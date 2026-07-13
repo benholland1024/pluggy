@@ -1,0 +1,99 @@
+<mujocoinclude>
+  <worldbody>
+
+    <!-- origin at axle height (aka wheel radius) -->
+    <body name="pluggybot" pos="0 0 0.035">
+      <freejoint />
+      
+      <geom
+        name="chassis"
+        type="box"
+        size="0.12 0.09 0.03"
+        pos="0 0 0.045"
+        mass="0.9"
+        rgba="0.2 0.4 0.8 1"
+      />
+
+      <body name="left_wheel" pos="-0.08 0.105 0">
+        <joint
+          name="left_wheel_joint"
+          type="hinge"
+          axis="0 1 0"
+          armature="0.005"
+        />
+        <geom
+          type="cylinder"
+          size="0.035 0.012"
+          zaxis="0 1 0"
+          mass="0.05"
+          rgba="0.1 0.1 0.1 1"
+        />
+        <!-- Spoke - purely visual, to see rotation  -->
+        <geom
+          type="box"
+          size="0.03 0.013 0.004"
+          mass="0.001"
+          contype="0"
+          conaffinity="0"
+          rgba="1 1 0.3 1"
+        />
+      </body>
+
+      <body name="right_wheel" pos="-0.08 -0.105 0">
+        <joint
+          name="right_wheel_joint"
+          type="hinge"
+          axis="0 1 0"
+          armature="0.005"
+        />
+        <geom
+          type="cylinder"
+          size="0.035 0.012"
+          zaxis="0 1 0"
+          mass="0.05"
+          rgba="0.1 0.1 0.1 1"
+        />
+        <!-- Spoke - purely visual, to see rotation  -->
+        <geom
+          type="box"
+          size="0.03 0.013 0.004"
+          mass="0.001"
+          contype="0"
+          conaffinity="0"
+          rgba="1 1 0.3 1"
+        />
+      </body>
+
+      <!-- caster:
+        center height is radius at rest,
+        so z = caster_radius − wheel_radius = 0.02 − 0.035 = −0.015 -->
+      <geom
+        name="caster" 
+        type="sphere"
+        size="0.02"
+        pos="0.10 0 -0.015"
+        mass="0.02"
+        friction="0.001"
+      />
+
+    </body>
+  </worldbody>
+
+  <actuator>
+    <velocity
+      name="left_motor"
+      joint="left_wheel_joint"
+      kv="0.5"
+      ctrlrange="-35 35"
+      forcerange="-1.4 1.4"
+    />
+    <velocity
+      name="right_motor"
+      joint="right_wheel_joint"
+      kv="0.5"
+      ctrlrange="-35 35"
+      forcerange="-1.4 1.4"
+    />
+  </actuator>
+
+</mujocoinclude>
