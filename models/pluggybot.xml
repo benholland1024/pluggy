@@ -1,5 +1,9 @@
 <mujocoinclude>
+  <visual><global offwidth="1280" offheight="720"/></visual>
+
   <worldbody>
+
+    
 
     <!-- origin at axle height (aka wheel radius) -->
     <body name="pluggybot" pos="0 0 0.035">
