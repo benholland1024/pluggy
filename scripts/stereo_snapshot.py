@@ -4,7 +4,7 @@ import mujoco
 import numpy as np
 from PIL import Image
 
-MODEL_PATH = Path(__file__).parent.parent / "models" / "world.xml"
+MODEL_PATH = Path(__file__).parent.parent / "models" / "playground.xml"
 
 model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
 data = mujoco.MjData(model)

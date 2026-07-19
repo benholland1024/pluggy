@@ -8,7 +8,7 @@ TRACK_WIDTH = 0.21
 SPEED_STEP = 0.3      # m/s per keypress
 TURN_STEP = 1.0       # rad/s per keypress
 
-model = mujoco.MjModel.from_xml_path("models/world.xml")
+model = mujoco.MjModel.from_xml_path("models/playground.xml")
 data = mujoco.MjData(model)
 
 command = {"vel": 0.0, "ang_vel": 0.0}   # latched speed + angular velocity
