@@ -20,7 +20,7 @@ def test_rests_level(world_model, world_data):
 
 def test_drives_straight(world_model, world_data):
   settle(world_model, world_data)
-  world_data.ctrl[:] = 35.0
+  world_data.ctrl[:] = 21.0
   settle(world_model, world_data, seconds=5.0)
   assert world_data.qpos[0] > 2.0           # actually went somewhere
   assert abs(world_data.qpos[1]) < 0.05     # without veering

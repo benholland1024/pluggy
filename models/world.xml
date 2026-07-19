@@ -1,5 +1,8 @@
 <mujoco>
 
+  <!-- Needed to fix wheel physics -->
+  <option integrator="implicitfast"/>
+
   <include file="pluggybot.xml" />
 
   <worldbody>

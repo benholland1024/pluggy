@@ -3,7 +3,7 @@ import time
 import mujoco
 import mujoco.viewer
 
-WHEEL_RADIUS = 0.035
+WHEEL_RADIUS = 0.045
 TRACK_WIDTH = 0.21
 SPEED_STEP = 0.3      # m/s per keypress
 TURN_STEP = 1.0       # rad/s per keypress
