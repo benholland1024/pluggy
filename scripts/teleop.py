@@ -11,7 +11,10 @@ TURN_STEP = 1.0       # rad/s per keypress
 model = mujoco.MjModel.from_xml_path("models/playground.xml")
 data = mujoco.MjData(model)
 
-command = {"vel": 0.0, "ang_vel": 0.0}   # latched speed + angular velocity
+command = {
+  "vel": 0.0,     # latched speed (up to increase, down to decrease)
+  "ang_vel": 0.0  # angulary velocity of the robot (not the wheels)
+}
 KEY_RIGHT, KEY_LEFT, KEY_DOWN, KEY_UP, KEY_SPACE = 262, 263, 264, 265, 32
 
 def key_callback(keycode):
@@ -32,8 +35,11 @@ right = model.actuator("right_motor").id
 with mujoco.viewer.launch_passive(model, data, key_callback=key_callback) as viewer:
   while viewer.is_running():
     start = time.time()
+
+    # Set the angular velocity of each wheel
     data.ctrl[left] = (command["vel"] - command["ang_vel"] * TRACK_WIDTH / 2) / WHEEL_RADIUS
     data.ctrl[right] = (command["vel"] + command["ang_vel"] * TRACK_WIDTH / 2) / WHEEL_RADIUS
+    
     mujoco.mj_step(model, data)
     viewer.sync()
     leftover = model.opt.timestep - (time.time() - start)

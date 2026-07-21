@@ -1,6 +1,8 @@
 <mujoco>
 
-  <!-- Needed to fix wheel physics -->
+  <!-- Needed to fix wheel physics 
+        https://mujoco.readthedocs.io/en/stable/computation/index.html#numerical-integration
+  -->
   <option integrator="implicitfast"/>
 
   <include file="pluggybot.xml" />

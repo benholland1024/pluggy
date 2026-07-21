@@ -13,6 +13,8 @@ uv run python -m mujoco.viewer --mjcf=models/world.xml
 Run scripts in /tests/ :
 ```bash
 uv run pytest -v
+# or, to output print statements:
+uv run pytest -vs
 ```
 
 
