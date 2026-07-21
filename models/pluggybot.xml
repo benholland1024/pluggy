@@ -19,7 +19,7 @@
       />
 
       <!--  Head  -->
-      <body name="head" pos="-0.08 0 0.095">
+      <body name="head" pos="-0.08 0 0.135">
         <geom
           name="head_mount"
           type="box"
@@ -48,14 +48,12 @@
           armature="0.012"
           damping="0.05"
         />
-        <!-- solref simulates compliant, damped tire contact (rubber) -->
         <geom
           type="cylinder"
           size="0.045 0.005"
           zaxis="0 1 0"
           mass="0.05"
           rgba="0.1 0.1 0.1 1"
-          solref="0.05 1"
         />
         <!-- Spoke - purely visual, to see rotation  -->
         <geom
@@ -76,14 +74,12 @@
           armature="0.012"
           damping="0.05"
         />
-        <!-- solref simulates compliant, damped tire contact (rubber) -->
         <geom
           type="cylinder"
           size="0.045 0.005"
           zaxis="0 1 0"
           mass="0.05"
           rgba="0.1 0.1 0.1 1"
-          solref="0.05 1"
         />
         <!-- Spoke - purely visual, to see rotation  -->
         <geom
@@ -98,14 +94,19 @@
 
       <!-- caster:
         center height is radius at rest,
-        so z = caster_radius − wheel_radius = 0.02 − 0.045 = −0.025 -->
+        so z = caster_radius − wheel_radius = 0.02 − 0.045 = −0.025 
+        
+        condim="1" makes it frictionless (while retaining normal force)
+        priority="1" makes it so the frictionless is the priority over the floor's friction
+      -->
       <geom
         name="caster" 
         type="sphere"
         size="0.02"
         pos="0.10 0 -0.025"
         mass="0.02"
-        friction="0.001"
+        condim="1"
+        priority="1"
       />
 
     </body>
