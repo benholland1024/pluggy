@@ -1,0 +1,103 @@
+<mujoco>
+  <include file="world.xml"/>
+  <worldbody>
+
+    <!--  Map (y+ is north, x+ is east)
+
+      ########################################
+      #                  #                   #
+      #                  #                   #
+      #      ###                             #
+      #      ###                             #
+      #                  #                   #
+      #                  #       #####       #
+      #                  #       #####       #
+      #       x          #          ##       #
+      #                  #          ##       #
+      #               ####                   #
+      #               ####                   #
+      ########################################
+
+      Walls:
+       - North
+       - East
+       - South
+       - West
+       - Divider top
+       - Divider bottom
+      Room 1:
+       - Corner box
+       - Floor box
+      Room 2:
+        - L box north
+        - L box side
+    
+    -->
+
+    <!-- 8 more directional lights, to light the whole area -->
+    <light pos="2.0 0 3" dir="0 0 -1"/>
+    <light pos="4.0 0 3" dir="0 0 -1"/>
+    <light pos="0.0 2.0 3" dir="0 0 -1"/>
+    <light pos="2.0 2.0 3" dir="0 0 -1"/>
+    <light pos="4.0 2.0 3" dir="0 0 -1"/>
+    <light pos="0.0 4.0 3" dir="0 0 -1"/>
+    <light pos="2.0 4.0 3" dir="0 0 -1"/>
+    <light pos="4.0 4.0 3" dir="0 0 -1"/>
+    
+
+    <!--  Walls  -->
+    
+    <!-- Wall north (red)  -->
+    <body name="wall-north" pos="2.0 6.0 0">
+      <geom type="box" size="4.0 0.01 0.15" rgba="0.8 0.2 0.2 1"/>
+    </body>
+
+    <!-- Wall east (green) -->
+    <body name="wall-east" pos="6.0 2.0 0">
+      <geom type="box" size="0.01 4.0 0.15" rgba="0.2 0.8 0.2 1"/>
+    </body>
+
+    <!-- Wall south (blue)  -->
+    <body name="wall-south" pos="2.0 -2.0 0">
+      <geom type="box" size="4.0 0.01 0.15" rgba="0.2 0.2 0.8 1"/>
+    </body>
+
+    <!-- Wall west (yellow) -->
+    <body name="wall-west" pos="-2.0 2.0 0">
+      <geom type="box" size="0.01 4.0 0.15" rgba="0.8 0.8 0.2 1"/>
+    </body>
+
+    <!-- Wall divider top (purple) -->
+    <body name="wall-divider-top" pos="2.0 5.0 0">
+      <geom type="box" size="0.01 1.0 0.15" rgba="0.8 0.2 0.8 1"/>
+    </body>
+
+    <!-- Wall divider bottom (cyan) -->
+    <body name="wall-divider-bottom" pos="2.0 0.0 0">
+      <geom type="box" size="0.01 2.0 0.15" rgba="0.2 0.8 0.8 1"/>
+    </body>
+
+    <!--  Obstacles  -->
+ 
+    <!-- Corner box (black) -->
+    <body name="corner-box" pos="1.5 -1.5 0">
+      <geom type="box" size="0.5 0.5 0.15" rgba="0.1 0.1 0.1 1"/>
+    </body>
+
+    <!-- Floor box (white) -->
+    <body name="floor-box" pos="0.0 4 0">
+      <geom type="box" size="0.5 0.5 0.15" rgba="0.9 0.9 0.9 1"/>
+    </body>
+
+    <!-- L box north (light red) -->
+    <body name="L-box-north" pos="4.0 1 0">
+      <geom type="box" size="0.5 0.25 0.15" rgba="0.9 0.5 0.5 1"/>
+    </body>
+
+    <!-- L box side (light green) -->
+    <body name="L-box-side" pos="4.25 0.5 0">
+      <geom type="box" size="0.25 0.25 0.15" rgba="0.5 0.9 0.5 1"/>
+    </body>
+
+  </worldbody>
+</mujoco>

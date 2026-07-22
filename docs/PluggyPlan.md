@@ -41,7 +41,7 @@ The core idea: a small wheeled robot with stereo vision that explores its enviro
 
 1. ✅ Teleoperable differential-drive base in MuJoCo *(July 2026)*
 2. ✅ Stereo camera pair rendering from the robot *(July 2026)*
-3. Classical odometry from wheel encoders + IMU (dead reckoning + EKF)
+3. ✅ Classical odometry — dead reckoning from wheel angles, verified <2 % against ground truth on straights, spins, arcs, and S-curves *(July 2026; IMU/EKF fusion deferred until drift actually hurts)*
 4. Occupancy mapping + frontier exploration
 5. Outlet detector trained on synthetic data
 6. Docking controller (scripted baseline → RL)
@@ -75,4 +75,4 @@ pluggy/
 
 ## Status
 
-🚧 Milestones 1–2 complete (July 2026): teleoperable diff-drive base with a physics regression suite, stereo pair rendering with a parallax test. Hardware is anchored to real EU-purchasable parts in [Parts.md](Parts.md) (50:1 gearmotors w/ encoders, 90 mm wheels, 2× Pi Camera Module 3); hard-won simulation lessons live in [SimNotes.md](SimNotes.md). Next: classical odometry (milestone 3) and the plug/socket contact spike.
+🚧 Milestones 1–3 complete (July 2026): teleoperable diff-drive base with a physics regression suite, stereo pair rendering with a parallax test, and classical dead-reckoning odometry (`src/pluggybot/odometry/`) verified to <2 % of motion against simulator ground truth. Hardware is anchored to real EU-purchasable parts in [Parts.md](Parts.md) (50:1 gearmotors w/ encoders, 90 mm wheels, 2× Pi Camera Module 3); hard-won simulation lessons live in [SimNotes.md](SimNotes.md). Next: occupancy mapping + frontier exploration (milestone 4) and the plug/socket contact spike.

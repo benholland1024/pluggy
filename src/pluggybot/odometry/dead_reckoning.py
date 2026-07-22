@@ -3,7 +3,7 @@
 import math
 
 
-class dead_reckoner:
+class DeadReckoner:
   def __init__(self, wheel_radius: float, track_width: float) -> None:
     self.wheel_radius = wheel_radius
     self.track_width = track_width

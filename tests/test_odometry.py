@@ -2,7 +2,7 @@ import math
 import mujoco
 import pytest 
 
-from pluggybot.odometry.dead_reckoning import dead_reckoner
+from pluggybot.odometry.dead_reckoning import DeadReckoner
 
 WHEEL_RADIUS = 0.045
 TRACK_WIDTH = 0.21
@@ -39,7 +39,7 @@ def run_sim(reckoner, model, data, seconds=2.0):
 
 
 def test_dead_reckoning_straight(world_model, world_data):
-  reckoner = dead_reckoner(WHEEL_RADIUS, TRACK_WIDTH)
+  reckoner = DeadReckoner(WHEEL_RADIUS, TRACK_WIDTH)
 
   # Settle the world before anything
   run_sim(reckoner, world_model, world_data)
@@ -56,7 +56,7 @@ def test_dead_reckoning_straight(world_model, world_data):
   assert (y_error/total_distance < 0.05)
 
 def test_dead_reckoning_turn_in_place(world_model, world_data):
-  reckoner = dead_reckoner(WHEEL_RADIUS, TRACK_WIDTH)
+  reckoner = DeadReckoner(WHEEL_RADIUS, TRACK_WIDTH)
 
   # Track the true theta here, to accumulate it (instead of bounding between -pi and pi)
   true_theta = 0.0
@@ -80,7 +80,7 @@ def test_dead_reckoning_turn_in_place(world_model, world_data):
 
 
 def test_dead_reckoning_arc(world_model, world_data):
-  reckoner = dead_reckoner(WHEEL_RADIUS, TRACK_WIDTH)
+  reckoner = DeadReckoner(WHEEL_RADIUS, TRACK_WIDTH)
 
   # Track the true theta here, to accumulate it (instead of bounding between -pi and pi)
   true_theta = 0.0
@@ -109,7 +109,7 @@ def test_dead_reckoning_arc(world_model, world_data):
   assert(distance_measurement_error / total_distance < 0.05)
 
 def test_dead_reckoning_s_curve(world_model, world_data):
-  reckoner = dead_reckoner(WHEEL_RADIUS, TRACK_WIDTH)
+  reckoner = DeadReckoner(WHEEL_RADIUS, TRACK_WIDTH)
 
   # Track the true theta here, to accumulate it (instead of bounding between -pi and pi)
   true_theta = 0.0
