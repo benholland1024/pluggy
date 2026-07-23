@@ -1,4 +1,4 @@
-# This script provides dead reckoning using change in wheel angle over time.
+"""Dead reckoning: integrate wheel rotations into a pose estimate."""
 
 import math
 
