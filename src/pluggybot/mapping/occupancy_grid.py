@@ -1,0 +1,49 @@
+
+import numpy as np
+import math
+
+
+L_FREE = -0.4   # Amount to subtract when a ray passes through a cell
+L_OCC = 0.85    # amount to add when a ray collides a cell
+
+
+class OccupancyGrid:
+  def __init__(self, x_min, y_min, x_max, y_max, resolution=0.05):
+    self.x_min = x_min
+    self.y_min = y_min
+    self.x_max = x_max
+    self.y_max = y_max
+    self.resolution = resolution
+
+    row_count = int((y_max - y_min) / resolution)
+    column_count = int((x_max - x_min) / resolution)
+    self.grid = np.zeros((row_count, column_count))
+
+  def world_to_cell(self, x, y) -> tuple[int, int]:
+    """Given world coordinate, return the coordinate of the occupancy map"""
+    cell_x = int((x - self.x_min) / self.resolution)
+    cell_y = int((y - self.y_min) / self.resolution)
+    return (cell_x, cell_y)
+
+  def cell_to_world(self, x, y) -> tuple[float, float]:
+    """Given a cell on the occupancy map, return the world coordinates"""
+    world_x = ((x + 0.5) * self.resolution) + self.x_min
+    world_y = ((y + 0.5) * self.resolution) + self.y_min
+    return (world_x, world_y)
+    
+  def update(self, pose, angles, ranges, max_range):   # pose = (x, y, theta)
+    """Update the occupancy map"""
+    px, py, theta = pose
+
+    # Scan origin = camera, sitting 0.03 fwd / 0.03 left of axle, rotated by heading
+    ox = px + 0.03 * math.cos(theta) - 0.03 * math.sin(theta)
+    oy = py + 0.03 * math.sin(theta) + 0.03 * math.cos(theta)
+
+    rows, cols = self.grid.shape
+    for angle, r in zip(angles,ranges):        # zip: merge two arrays in pairs
+      a = theta + angle                        # ray direction in world frame
+
+
+
+  def to_image(self) -> np.ndarray:             # uint8: 0 wall / 255 free / 127 unknown
+    """Generate an image of the occupancy map"""

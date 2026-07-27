@@ -1,6 +1,5 @@
 import math
 import mujoco
-import pytest 
 
 from pluggybot.odometry.dead_reckoning import DeadReckoner
 
