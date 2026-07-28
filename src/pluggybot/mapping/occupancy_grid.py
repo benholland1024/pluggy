@@ -42,8 +42,29 @@ class OccupancyGrid:
     rows, cols = self.grid.shape
     for angle, r in zip(angles,ranges):        # zip: merge two arrays in pairs
       a = theta + angle                        # ray direction in world frame
+      hit = r < max_range - 1e-6               # max-range rays hit nothing!
 
+      # -- free space: sample along the ray, stopping one cell short of the endpoint
+      free_len = r - self.resolution if hit else r
+      n = max(2, int(free_len / (self.resolution / 2)))
+      ts = np.linspace(0.0, free_len, n)
+      ixs = ((ox + ts * np.cos(a) - self.x_min) / self.resolution).astype(int)
+      iys = ((oy + ts * np.sin(a) - self.y_min) / self.resolution).astype(int)
+      valid = (ixs >= 0) & (ixs < cols) & (iys >= 0) & (iys < rows)    # No negative wrap arounds
+      self.grid[iys[valid], ixs[valid]] += L_FREE
+
+      # -- The hit itself
+      if hit:
+        ix, iy = self.world_to_cell(ox + r * math.cos(a), oy + r * math.sin(a))
+        if 0 <= ix < cols and 0 <= ix < rows:
+          self.grid[iy, ix] += L_OCC
+
+    np.clip(self.grid, -5.0, 5.0, out=self.grid)
 
 
   def to_image(self) -> np.ndarray:             # uint8: 0 wall / 255 free / 127 unknown
     """Generate an image of the occupancy map"""
+    img = np.full(self.grid.shape, 127, dtype=np.uint8)
+    img[self.grid < -0.5] = 255    # confidently free
+    img[self.grid > 0.5] = 0       # confidently occupied
+    return img
