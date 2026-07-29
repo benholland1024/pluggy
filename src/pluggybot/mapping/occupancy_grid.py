@@ -56,7 +56,7 @@ class OccupancyGrid:
       # -- The hit itself
       if hit:
         ix, iy = self.world_to_cell(ox + r * math.cos(a), oy + r * math.sin(a))
-        if 0 <= ix < cols and 0 <= ix < rows:
+        if 0 <= ix < cols and 0 <= iy < rows:
           self.grid[iy, ix] += L_OCC
 
     np.clip(self.grid, -5.0, 5.0, out=self.grid)
