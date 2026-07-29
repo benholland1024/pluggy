@@ -59,7 +59,7 @@ def test_max_range_ray_no_flag(grid):
   grid.update(pose=(0.0, 0.0, 0.0), angles=[0.0], ranges=[5.0], max_range=5.0)
   assert logodds_at(grid, 2.5, 0.03) < 0    # beam interior: marked free
   assert logodds_at(grid, 5.03, 0.03) <= 0  # the far tip: free or untouched
-  assert (grid.grid <= 0).all()   # Redundant, more thorough:
+  assert (grid.grid <= 0).all()             # Redundant, more thorough:
                                             #  A miss leaves no positive evidence anywhere
 
 def test_frames_compose(grid):
