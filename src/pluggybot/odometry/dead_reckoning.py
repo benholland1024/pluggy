@@ -13,7 +13,7 @@ class DeadReckoner:
     self._prev_left: float | None = None
     self._prev_right: float | None = None
   
-  def update(self, left_angle: float, right_angle: float):
+  def update(self, left_angle: float, right_angle: float, gyro_yaw_rate=None, dt=None):
     """Advance the pose from new absolute wheel angles (radians)."""
 
     if self._prev_left is None or self._prev_right is None:
@@ -28,7 +28,10 @@ class DeadReckoner:
     d_dist = self.wheel_radius * (d_left + d_right) / 2
 
     # Angular velocity (of the bot) is difference of wheel speeds, divided by track width
-    d_theta = self.wheel_radius * (d_right - d_left) / self.track_width
+    if gyro_yaw_rate is not None:
+        d_theta = gyro_yaw_rate * dt
+    else:
+        d_theta = self.wheel_radius * (d_right - d_left) / self.track_width
 
     # Update position + angle info
     heading = self.theta + d_theta / 2  # midpoint heading: cheap accuracy win

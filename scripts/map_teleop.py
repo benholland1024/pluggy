@@ -14,6 +14,8 @@ WHEEL_RADIUS = 0.045
 TRACK_WIDTH = 0.21
 SPEED_STEP = 0.3      # m/s per keypress
 TURN_STEP = 1.0       # rad/s per keypress
+MAX_WHEEL_ACCEL = 30.0   # rad/s^2 at the wheel
+
 
 model = mujoco.MjModel.from_xml_path("models/room_1.xml")
 data = mujoco.MjData(model)
@@ -55,9 +57,12 @@ with mujoco.viewer.launch_passive(model, data, key_callback=key_callback) as vie
   while viewer.is_running():
     start = time.time()
 
-    # Set the angular velocity of each wheel
-    data.ctrl[left] = (command["vel"] - command["ang_vel"] * TRACK_WIDTH / 2) / WHEEL_RADIUS
-    data.ctrl[right] = (command["vel"] + command["ang_vel"] * TRACK_WIDTH / 2) / WHEEL_RADIUS
+    # Set the angular velocity of each wheel. Ramped, to avoid slipping
+    target_l = (command["vel"] - command["ang_vel"] * TRACK_WIDTH / 2) / WHEEL_RADIUS
+    target_r = (command["vel"] + command["ang_vel"] * TRACK_WIDTH / 2) / WHEEL_RADIUS
+    max_step = MAX_WHEEL_ACCEL * model.opt.timestep
+    data.ctrl[left]  += np.clip(target_l - data.ctrl[left],  -max_step, max_step)
+    data.ctrl[right] += np.clip(target_r - data.ctrl[right], -max_step, max_step)
 
     # Update the tracked position using the reckoner
     reckoner.update(data.qpos[left_adr], data.qpos[right_adr])
@@ -76,6 +81,9 @@ with mujoco.viewer.launch_passive(model, data, key_callback=key_callback) as vie
 
     if data.time - last_save >= 0.5:
       last_save = data.time
-      Image.fromarray(np.flipud(grid.to_image())).save("map.png")
+      img = grid.to_image()
+      cell_x, cell_y = grid.world_to_cell(reckoner.x, reckoner.y)
+      img[max(0, cell_y - 1):cell_y + 2, max(0, cell_x - 1):cell_x + 2] = 64  # 3×3 dark block
+      Image.fromarray(np.flipud(img)).save("map.png")
 
 

@@ -8,6 +8,9 @@
     <!-- origin at axle height (aka wheel radius) -->
     <body name="pluggybot" pos="0 0 0.045">
       <freejoint />
+
+      <!-- For the gyroscope  -->
+      <site name="imu" pos="0 0 0.05"/> 
       
       <geom
         name="chassis"
@@ -128,5 +131,9 @@
       forcerange="-2.06 2.06"
     />
   </actuator>
+
+  <sensor>
+    <gyro name="imu_gyro" site="imu"/>
+  </sensor>
 
 </mujocoinclude>
