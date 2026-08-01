@@ -42,7 +42,7 @@ The core idea: a small wheeled robot with stereo vision that explores its enviro
 1. ✅ Teleoperable differential-drive base in MuJoCo *(July 2026)*
 2. ✅ Stereo camera pair rendering from the robot *(July 2026)*
 3. ✅ Classical odometry — dead reckoning from wheel angles, verified <2 % against ground truth on straights, spins, arcs, and S-curves *(July 2026; IMU/EKF fusion deferred until drift actually hurts)*
-4. Occupancy mapping + frontier exploration
+4. ✅ Occupancy mapping + frontier exploration — log-odds grid from a virtual laser scan (depth-image center row), gyro-fused odometry, A* over inflated free space, autonomous frontier exploration with look-around spins; maps both rooms collision-free and self-terminates *(July 2026)*
 5. Outlet detector trained on synthetic data
 6. Docking controller (scripted baseline → RL)
 7. Battery model + state machine tying the full loop together: explore → detect → approach → dock → charge
@@ -75,4 +75,4 @@ pluggy/
 
 ## Status
 
-🚧 Milestones 1–3 complete (July 2026): teleoperable diff-drive base with a physics regression suite, stereo pair rendering with a parallax test, and classical dead-reckoning odometry (`src/pluggybot/odometry/`) verified to <2 % of motion against simulator ground truth. Hardware is anchored to real EU-purchasable parts in [Parts.md](Parts.md) (50:1 gearmotors w/ encoders, 90 mm wheels, 2× Pi Camera Module 3); hard-won simulation lessons live in [SimNotes.md](SimNotes.md). Next: occupancy mapping + frontier exploration (milestone 4) and the plug/socket contact spike.
+🚧 Milestones 1–4 complete (July 2026): teleoperable diff-drive base with a physics regression suite; stereo pair rendering with a parallax test; classical dead-reckoning odometry (<2 % error, gyro-fused for heading); and full autonomous mapping — virtual laser scanner from ground-truth depth, log-odds occupancy grid, A* path planning, frontier exploration (`scripts/explore.py` maps both rooms of `room_1.xml` collision-free and terminates on its own). Hardware is anchored to real EU-purchasable parts in [Parts.md](Parts.md); simulation lessons live in [SimNotes.md](SimNotes.md). Next: outlet detector on synthetic data (milestone 5 — the machine learning begins) and the plug/socket contact spike.

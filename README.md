@@ -1,8 +1,10 @@
 # pluggybot
 
-Start the teleop script (or any script):
+Start one of the various scripts:
 ```bash
-uv run python scripts/teleop.py
+uv run python scripts/teleop.py      # Teleop test the robot
+uv run python scripts/map_teleop.py  # Teleop the robot while updating /map.png
+uv run python scripts/explore.py     # Run the frontier exploration script (also updates map)
 ```
 
 View the world:
@@ -17,4 +19,19 @@ uv run pytest -v
 uv run pytest -vs
 ```
 
+# Outlet visual recognition with Yolo CNN
 
+Regenerate the training data:
+```bash
+MUJOCO_GL=egl uv run python scripts/generate_outlet_dataset.py --count 1200
+```
+
+Train the outlet detector with YOLO:
+```bash
+uv run yolo detect train data=datasets/outlets/dataset.yaml model=yolo11n.pt epochs=50 imgsz=640
+```
+
+Test predictions with YOLO:
+```bash
+uv run yolo predict model=runs/detect/train/weights/best.pt source=datasets/outlets/images/val
+```

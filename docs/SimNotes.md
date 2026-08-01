@@ -52,6 +52,12 @@ The original 30:1/1.4 N·m spec on a 1.1 kg robot demands ~40 N of thrust per wh
 - A body with no joint is welded to its parent; a `<geom>` with `contype="0" conaffinity="0"` is visual-only (wheel spokes, future pretty meshes).
 - Velocity actuators: `ctrlrange` = ± no-load speed (rad/s), `forcerange` = ± stall torque (N·m), both straight off the motor datasheet; `kv` is a tuning gain, not a datasheet number.
 
+## Exploration lessons (milestone 4)
+
+- **The nearest-frontier deadlock.** A forward camera cannot observe the cells beside its own wheels, so the nearest frontier is always the unscanned sliver just outside the FOV — the robot "arrives" instantly, stops, and the frontier never dissolves. First verification run: 420 sim-seconds, zero movement. Fixes: ignore frontiers closer than ~0.3 m, and do a 360° look-around spin at startup and whenever no distant frontier is reachable.
+- **Collisions corrupt the map, not just the paint job.** Grinding a wall slips the wheels → odometry counts phantom distance → the map frame slides → old walls repaint at new believed positions ("jail bar" artifacts, evidence outside the room). Prevention beats cure: obstacle inflation must exceed the chassis **half-diagonal** (0.15 m) plus margin — we use 5 cells / 0.25 m; sparse waypoints + generous arrival radii cut corners through the inflation ring (use ≤3-cell spacing, ≤0.08 m radius); and a scan-based reflex (stop + back off when anything is <0.25 m dead ahead) catches what planning misses.
+- **Termination is "no *reachable* frontiers," not "no frontiers."** Unreachable slivers (pockets inside obstacles, hairline gaps) are blacklisted when A* fails; exploration ends after a look-around spin plus repeated pathless replans. Benchmark: both rooms of room_1.xml in ~80 sim-seconds, 0 chassis contacts.
+
 ## Debugging workflow that worked
 
 1. Reproduce headlessly with printed telemetry (pose, wheel ω, contact list, `ncon`) — vibes don't bisect.
