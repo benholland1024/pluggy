@@ -58,6 +58,30 @@ The original 30:1/1.4 N·m spec on a 1.1 kg robot demands ~40 N of thrust per wh
 - **Collisions corrupt the map, not just the paint job.** Grinding a wall slips the wheels → odometry counts phantom distance → the map frame slides → old walls repaint at new believed positions ("jail bar" artifacts, evidence outside the room). Prevention beats cure: obstacle inflation must exceed the chassis **half-diagonal** (0.15 m) plus margin — we use 5 cells / 0.25 m; sparse waypoints + generous arrival radii cut corners through the inflation ring (use ≤3-cell spacing, ≤0.08 m radius); and a scan-based reflex (stop + back off when anything is <0.25 m dead ahead) catches what planning misses.
 - **Termination is "no *reachable* frontiers," not "no frontiers."** Unreachable slivers (pockets inside obstacles, hairline gaps) are blacklisted when A* fails; exploration ends after a look-around spin plus repeated pathless replans. Benchmark: both rooms of room_1.xml in ~80 sim-seconds, 0 chassis contacts.
 
+## Rendering lessons (milestone 5)
+
+### Segmentation rendering needs `offsamples="0"`
+Free labels from segmentation rendering are only free if the buffer is honest. MuJoCo
+applies multisample antialiasing to the segmentation image too, blending geom IDs at
+object edges — so pixels appear carrying IDs of geoms that aren't there. Most land
+harmlessly, but a label box spans the **min/max** of its mask, so one stray pixel 200 px
+from the outlet stretches the box across half the frame. Measured over 236 positive
+scenes: **12.3 % grew a second blob, 5.5 % came out grossly elongated** (a square 80 mm
+Schuko plate labeled as a bar with w/h up to 7.7). The training run scored mAP50-95 0.940
+*despite* ~3 % of its labels being garbage, and the val images showed the model drawing
+two correct tight boxes where the truth was one absurd bar — the model was right.
+
+```xml
+<visual><quality offsamples="0"/></visual>
+```
+
+Drops stray blobs to 0.0 %. `make_labeled_sample` additionally keeps only the largest
+connected blob, so a survivor gets dropped rather than silently poisoning a label.
+
+Meta-lesson: **the renderer is not a measurement device by default.** Anything that
+smooths pixels for human eyes — antialiasing, filtering, interpolation — corrupts a
+buffer whose values are identifiers rather than colors.
+
 ## Debugging workflow that worked
 
 1. Reproduce headlessly with printed telemetry (pose, wheel ω, contact list, `ncon`) — vibes don't bisect.

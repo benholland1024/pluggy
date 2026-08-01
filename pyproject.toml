@@ -12,8 +12,23 @@ dependencies = [
     "numpy>=2.5.1",
     "pillow>=12.3.0",
     "scipy>=1.18.0",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
     "ultralytics>=8.4.114",
 ]
+
+# PyPI's default torch is built for CUDA 13.0, which needs a 580+ NVIDIA driver.
+# This machine runs 570.x (CUDA 12.8), so the default wheel silently falls back
+# to CPU. Pull torch/torchvision from PyTorch's cu128 index instead.
+# `explicit = true` means ONLY these two packages come from it.
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
 
 [build-system]
 requires = ["uv_build>=0.11.28,<0.12.0"]

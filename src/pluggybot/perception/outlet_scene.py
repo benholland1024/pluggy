@@ -14,6 +14,7 @@ import math
 
 import mujoco
 import numpy as np
+from scipy import ndimage
 
 OUTLET_PREFIX = "outlet_"
 MIN_LABEL_PIXELS = 60       # an outlet smaller than this is unlearnable; reroll
@@ -199,6 +200,12 @@ def random_scene_xml(rng, with_outlet=True):
   xml = f"""
 <mujoco>
   <visual><global offwidth="{IMG_W}" offheight="{IMG_H}"/>
+    <!-- offsamples="0" disables multisample antialiasing. MSAA blends geom IDs
+         at object edges, so the segmentation buffer invents pixels carrying IDs
+         no geom owns there — and when one collides with an outlet geom's ID, the
+         bbox stretches from the outlet to that speck. Measured: 12% of positive
+         labels had stray blobs, 5% were grossly elongated; 0% with this set. -->
+    <quality offsamples="0"/>
     <headlight ambient="{rng.uniform(0.15, 0.45):.2f} {rng.uniform(0.15, 0.45):.2f} {rng.uniform(0.15, 0.45):.2f}"/>
   </visual>{assets}
   <worldbody>{light}
@@ -236,6 +243,18 @@ def make_labeled_sample(rng, with_outlet, max_attempts=8):
     outlet_ids = [g for g in range(model.ngeom)
                   if (model.geom(g).name or "").startswith(OUTLET_PREFIX)]
     mask = np.isin(seg[:, :, 0], outlet_ids) & (seg[:, :, 1] == int(mujoco.mjtObj.mjOBJ_GEOM))
+
+    # Belt and braces: an outlet is one contiguous blob, so keep only the
+    # largest. The box spans min/max of the mask, so a single stray pixel
+    # elsewhere in the frame stretches it across the image. `offsamples="0"`
+    # (see random_scene_xml) removes the known source of strays; this catches
+    # any that survive rather than silently poisoning a label.
+    labels, n_blobs = ndimage.label(mask)
+    if n_blobs > 1:
+      counts = np.bincount(labels.ravel())
+      counts[0] = 0                    # index 0 is background, never the winner
+      mask = labels == counts.argmax()
+
     if mask.sum() < MIN_LABEL_PIXELS:
       continue                         # occluded or too far away: reroll the scene
     ys, xs = np.nonzero(mask)
