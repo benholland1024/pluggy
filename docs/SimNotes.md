@@ -82,6 +82,14 @@ Meta-lesson: **the renderer is not a measurement device by default.** Anything t
 smooths pixels for human eyes — antialiasing, filtering, interpolation — corrupts a
 buffer whose values are identifiers rather than colors.
 
+### Dataset regeneration must clean its output directory
+The train/val split is a random per-image draw, so a file whose split changes between
+runs leaves its old copy alive in the other split — regenerating after the MSAA fix
+still left **195 stale image/label pairs** from the buggy run mixed into training, and
+the "residual" corrupt labels were all leftovers. The generator now deletes `images/`
+and `labels/` before writing (guarded by a pytest). Symptom to remember: the same
+basename appearing in both splits.
+
 ## Debugging workflow that worked
 
 1. Reproduce headlessly with printed telemetry (pose, wheel ω, contact list, `ncon`) — vibes don't bisect.

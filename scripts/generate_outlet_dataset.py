@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -31,12 +32,25 @@ def draw_bbox(img, bbox):
   return img
 
 
-def main(count, out, seed):
-  rng = np.random.default_rng(seed)
-  out = Path(out)
+def clean_output_dirs(out: Path):
+  """Delete images/ and labels/ wholesale, then recreate the split dirs.
+
+  Regenerating into a dirty directory silently contaminates the dataset: the
+  train/val split is a random draw per image, so a file whose split changes
+  between runs leaves its old copy alive in the other split. One run left 195
+  stale image/label pairs from a buggy predecessor mixed into training.
+  """
+  for sub in ("images", "labels"):
+    shutil.rmtree(out / sub, ignore_errors=True)
   for split in ("train", "val"):
     (out / "images" / split).mkdir(parents=True, exist_ok=True)
     (out / "labels" / split).mkdir(parents=True, exist_ok=True)
+
+
+def main(count, out, seed):
+  rng = np.random.default_rng(seed)
+  out = Path(out)
+  clean_output_dirs(out)
 
   sheet_tiles, n_pos, n_neg, box_areas = [], 0, 0, []
   saved = 0
