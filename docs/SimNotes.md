@@ -56,6 +56,20 @@ The original 30:1/1.4 N·m spec on a 1.1 kg robot demands ~40 N of thrust per wh
 
 - **The nearest-frontier deadlock.** A forward camera cannot observe the cells beside its own wheels, so the nearest frontier is always the unscanned sliver just outside the FOV — the robot "arrives" instantly, stops, and the frontier never dissolves. First verification run: 420 sim-seconds, zero movement. Fixes: ignore frontiers closer than ~0.3 m, and do a 360° look-around spin at startup and whenever no distant frontier is reachable.
 - **Collisions corrupt the map, not just the paint job.** Grinding a wall slips the wheels → odometry counts phantom distance → the map frame slides → old walls repaint at new believed positions ("jail bar" artifacts, evidence outside the room). Prevention beats cure: obstacle inflation must exceed the chassis **half-diagonal** (0.15 m) plus margin — we use 5 cells / 0.25 m; sparse waypoints + generous arrival radii cut corners through the inflation ring (use ≤3-cell spacing, ≤0.08 m radius); and a scan-based reflex (stop + back off when anything is <0.25 m dead ahead) catches what planning misses.
+- **The safety reflex must be armed in every maneuver, not just while driving.**
+  `explore.py` gated it on `mode == "drive" and waypoints`, so look-around spins ran
+  blind. Measured over a full run: its spins passed within **0.257 m** of the L-box —
+  7 mm outside the 0.25 m threshold. Zero collisions was luck, not design. Refactoring
+  into `lifecycle.py` shifted the trajectory by <1 mm/step (closed-loop driving among
+  obstacles is chaotic; identical logic will not retrace an identical path), the final
+  spin landed inside the margin, and the chassis ground for **503 steps**. Arming the
+  reflex in all maneuvers cut that to 43, all of them *during the escape*. Caveat: a
+  forward ±20° reflex fundamentally cannot protect a spin (the chassis corner sweeps
+  through arcs the camera never sees) — driving it to zero needs 360° clearance
+  memory, e.g. checking the robot's own cell against the inflated grid before spinning.
+- **Don't re-arm a reflex that is already firing.** Re-triggering backoff on every scan
+  while reversing turns a bounded 0.8 s pulse into an open-ended reverse into whatever
+  is behind the robot.
 - **Termination is "no *reachable* frontiers," not "no frontiers."** Unreachable slivers (pockets inside obstacles, hairline gaps) are blacklisted when A* fails; exploration ends after a look-around spin plus repeated pathless replans. Benchmark: both rooms of room_1.xml in ~80 sim-seconds, 0 chassis contacts.
 
 ## Rendering lessons (milestone 5)

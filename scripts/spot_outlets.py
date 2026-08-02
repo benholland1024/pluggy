@@ -13,16 +13,14 @@ Usage:
 """
 
 import argparse
-import glob
 import math
-import os
 
 import mujoco
 
 from pluggybot.control import wheel_targets, slew
 from pluggybot.mapping.landmarks import LandmarkStore
 from pluggybot.odometry.dead_reckoning import DeadReckoner
-from pluggybot.perception.outlet_spotter import OutletSpotter
+from pluggybot.perception.outlet_spotter import OutletSpotter, latest_weights
 
 SPOT_PERIOD = 0.5    # sim seconds between YOLO looks
 W_SPIN = 1.0         # rad/s during look-around spins
@@ -30,14 +28,6 @@ V_DRIVE = 0.3        # m/s during the straight leg
 
 # (mode, amount): spin amounts are radians, drive amounts are seconds.
 ROUTE = [("spin", 2 * math.pi), ("drive", 3.0), ("spin", 2 * math.pi)]
-
-
-def latest_weights():
-  hits = sorted(glob.glob("runs/detect/*/weights/best.pt"), key=os.path.getmtime)
-  if not hits:
-    raise SystemExit("no trained weights under runs/detect/ -- train first "
-                     "(see README) or pass --weights")
-  return hits[-1]
 
 
 def main(weights: str) -> None:
@@ -67,7 +57,7 @@ def main(weights: str) -> None:
       if data.time >= next_spot:
         next_spot = data.time + SPOT_PERIOD
         for x, y, z, conf in spotter.spot(data, pose):
-          store.add_sighting(x, y, z)
+          store.add_sighting(x, y, z, seen_from=(pose[0], pose[1]))
           n_sightings += 1
           print(f"t={data.time:5.1f}s  sighting at ({x:+.2f}, {y:+.2f}, "
                 f"z={z:.2f})  conf={conf:.2f}")
@@ -93,8 +83,10 @@ def main(weights: str) -> None:
     err = math.sqrt((lm.x - truth[0]) ** 2 + (lm.y - truth[1]) ** 2
                     + (lm.z - truth[2]) ** 2)
     tag = "CONFIRMED" if lm in confirmed else f"seen x{lm.n_sightings}"
+    sx, sy, sheading = lm.standoff()
     print(f"  ({lm.x:+.2f}, {lm.y:+.2f}, z={lm.z:.2f})  {tag:<10s} "
-          f"nearest truth: {name} err={err * 100:.1f} cm")
+          f"nearest truth: {name} err={err * 100:.1f} cm   "
+          f"standoff: ({sx:+.2f}, {sy:+.2f}) hdg {math.degrees(sheading):+.0f} deg")
   print("\n(outlet_c is in room 2 -- the route never sees it; that's expected)")
 
 
@@ -102,4 +94,8 @@ if __name__ == "__main__":
   p = argparse.ArgumentParser(description=__doc__)
   p.add_argument("--weights", default=None, help="YOLO weights (.pt); default: newest under runs/")
   args = p.parse_args()
-  main(args.weights or latest_weights())
+  weights = args.weights or latest_weights()
+  if weights is None:
+    raise SystemExit("no trained weights under runs/detect/ -- train first "
+                     "(see README) or pass --weights")
+  main(weights)

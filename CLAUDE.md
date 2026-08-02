@@ -8,9 +8,9 @@ Simulated self-charging robot in MuJoCo. Before doing anything, read:
 ## Working style
 
 - Ben is learning robotics + Python (strong webdev background): default to
-  walkthroughs and explanations and let him write the code himself. When he
-  asks Claude to build something directly (time constraints), build it and
-  explain how it works afterward.
+  walkthroughs and explanations and offer to let him write the code himself. 
+  Due to time constraints, he will ask Claude to build something directly, 
+  so build it and explain how it works afterward.
 - Ben runs ML training himself — that's the learning experience he wants.
   Prepare data/plumbing; leave training runs, curve-reading, tuning to him.
 - Verify physics claims empirically (headless probes, filmstrip renders via

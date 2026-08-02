@@ -14,7 +14,9 @@ the pixel can be anywhere in the frame, so the vertical axis buys the outlet's
 height — which is all the 3-D the mission needs (no voxel map required).
 """
 
+import glob
 import math
+import os
 
 import mujoco
 import numpy as np
@@ -30,6 +32,13 @@ CAM_HEIGHT = 0.18
 
 CAM_W, CAM_H = 640, 360    # matches the detector's training image size/aspect
 MAX_RANGE = 6.0            # m: deeper "detections" are floor/far-plane junk
+
+
+def latest_weights(pattern: str = "runs/detect/*/weights/best.pt") -> str | None:
+  """Newest trained detector under runs/, or None if nothing is trained yet.
+  Lets scripts run without a hardcoded run name after each retrain."""
+  hits = sorted(glob.glob(pattern), key=os.path.getmtime)
+  return hits[-1] if hits else None
 
 
 def pixel_to_world(
