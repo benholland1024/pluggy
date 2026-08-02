@@ -90,6 +90,41 @@ the "residual" corrupt labels were all leftovers. The generator now deletes `ima
 and `labels/` before writing (guarded by a pytest). Symptom to remember: the same
 basename appearing in both splits.
 
+## Schuko contact spike (milestone-6 prep)
+
+Standalone plug/socket rig (`docking/schuko.py`, `scripts/schuko_spike.py`) — no robot,
+a compliant carrier pushes the plug with a 10 N force limit. Findings (guarded by
+tests/test_schuko.py):
+
+- **Collision geoms must be convex**, so the concave recess is *composed*: 12-box
+  dodecagonal well wall, 12 tilted boxes as a 45° entry funnel, 5 floor slabs leaving
+  two square pin holes, 4 boxes framing the face. Capsule pin tips double as their own
+  entry chamfer.
+- **Capture is set by the entry chamfer, not the recess.** First version used an 8 mm
+  45° funnel and measured a flattering ±18 mm lateral / ±4° yaw. Ben's challenge —
+  "real Schuko rims don't have that funnel" — was correct: with an honest 2 mm rim
+  bevel the envelope is **±3 mm lateral / ±3 mm vertical / ±2° yaw**. Capture ≈ body
+  clearance (0.75 mm) + chamfer; the deep recess only *guides after* capture. Don't
+  widen the chamfer to make a failing controller pass — that tunes the world, not the
+  robot. (Measured chamfer→tolerance: 2 mm→±3 mm, 4 mm→±6 mm, 8 mm→±18 mm; a dished
+  face plate on the physical charging outlet is a legitimate *hardware* choice that
+  buys margin honestly — a Parts.md decision, not a sim default.)
+- **Yaw is the tight constraint** — with a diagnostic signature: every yaw/lateral jam
+  stops ~19 mm short (= pin length): the pins bottom on the floor beside their holes
+  before the shallow well can square the 40 mm body. Docking must get *facing* right.
+- Jams are clean (stall at the force cap, no solver explosions); worst transient
+  contact force ~32 N during an edge-of-envelope wedge, fine at `timestep 0.001` +
+  `solref "0.005 1"`.
+- **The velocity-servo chatter lesson generalizes.** A velocity actuator driving the
+  90 g carrier chattered at the timestep frequency exactly like the bare wheels once
+  did (kv needed for 10 N @ 2 cm/s is far too stiff for that mass). Fix: constant-force
+  `<motor>` + heavy joint damping (`damping = F/v`) — implicitfast integrates damping
+  implicitly, so it cannot chatter, and "10 N push, 2 cm/s free speed" is the honest
+  robot semantics anyway.
+- Caveats for milestone 6: carrier compliance was 150 N/m lateral / 1 N·m/rad angular
+  (a guess at arm+base flex — revisit with the real arm), gravity off (the lift owns
+  height), and tolerances scale with that compliance.
+
 ## Debugging workflow that worked
 
 1. Reproduce headlessly with printed telemetry (pose, wheel ω, contact list, `ncon`) — vibes don't bisect.

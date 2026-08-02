@@ -20,96 +20,24 @@ import mujoco.viewer
 import numpy as np
 from PIL import Image
 
-from pluggybot.control import wheel_targets, slew, wrap_angle
-from pluggybot.mapping.astar import astar
-from pluggybot.mapping.frontier import find_frontiers, traversable_mask
+from pluggybot.behavior.navigation import (
+  BACKOFF_TIME,
+  FRONT_STOP_RANGE,
+  MAP_SAVE_PERIOD,
+  REPLAN_PERIOD,
+  SCAN_EVERY,
+  STRIKES_TO_FINISH,
+  W_SPIN,
+  WAYPOINT_RADIUS,
+  drive_toward,
+  path_to_waypoints,
+  plan,
+  render_map,
+)
+from pluggybot.control import wheel_targets, slew
 from pluggybot.mapping.occupancy_grid import OccupancyGrid
 from pluggybot.odometry.dead_reckoning import DeadReckoner
 from pluggybot.perception.scanner import Scanner
-
-SCAN_EVERY = 20          # physics steps between scans (500 Hz sim -> 25 Hz scanning)
-REPLAN_PERIOD = 2.0      # sim seconds between replans (the map changes under us)
-MAP_SAVE_PERIOD = 0.5    # sim seconds between map.png saves
-V_MAX = 0.4              # m/s cruise speed
-W_MAX = 1.5              # rad/s turn-rate clamp
-K_HEADING = 2.5          # P gain: heading error -> turn rate
-WAYPOINT_RADIUS = 0.08   # m: close enough to advance (small: big radii cut corners
-                         # through the inflation ring and clip obstacles)
-FRONT_STOP_RANGE = 0.25  # m: reflex threshold — camera-measured range dead ahead
-BACKOFF_TIME = 0.8       # s of straight reverse after the reflex trips
-MAX_PLAN_ATTEMPTS = 20   # frontiers tried per replan before giving up this round
-STRIKES_TO_FINISH = 3    # post-spin pathless replans before declaring done
-MIN_FRONTIER_CELLS = 6   # ignore frontiers closer than this (0.3 m): a forward camera
-                         # can't observe the cells beside its own wheels -- chasing
-                         # them deadlocks; they dissolve while driving to real goals
-W_SPIN = 1.0             # rad/s during a look-around spin
-
-
-def plan(grid, pose, blacklist):
-  """Pick the nearest reachable frontier and plan a path to it.
-
-  Returns (path, status): path is a cell list or None; status is "ok",
-  "no-frontiers" (map fully explored) or "no-reachable" (frontiers exist
-  but none could be pathed to this round).
-  """
-  trav = traversable_mask(grid.grid)
-  frontiers = find_frontiers(grid.grid, traversable=trav)
-  if len(frontiers) == 0:
-    return None, "no-frontiers"
-
-  rows, cols = grid.grid.shape
-  rix, riy = grid.world_to_cell(pose[0], pose[1])
-  rix, riy = min(max(rix, 0), cols - 1), min(max(riy, 0), rows - 1)
-
-  dist = np.hypot(frontiers[:, 0] - rix, frontiers[:, 1] - riy)
-  eligible = dist >= MIN_FRONTIER_CELLS
-  if not eligible.any():
-    return None, "only-near"             # a look-around spin will resolve these
-
-  order = np.argsort(np.where(eligible, dist, np.inf))
-  attempts = 0
-  for idx in order:
-    if not eligible[idx]:
-      break                              # only inf-distance (ineligible) cells remain
-    cell = (int(frontiers[idx, 0]), int(frontiers[idx, 1]))
-    if cell in blacklist:
-      continue
-    path = astar(trav, (rix, riy), cell)
-    if path is not None:
-      return path, "ok"
-    blacklist.add(cell)                  # unreachable this round; skip it in future
-    attempts += 1
-    if attempts >= MAX_PLAN_ATTEMPTS:
-      break
-  return None, "no-reachable"
-
-
-def path_to_waypoints(grid, path):
-  """Cell path -> sparse world waypoints (every 3rd cell keeps driving smooth)."""
-  cells = path[3::3]
-  if not cells or cells[-1] != path[-1]:
-    cells.append(path[-1])
-  return [grid.cell_to_world(ix, iy) for ix, iy in cells]
-
-
-def drive_toward(pose, waypoint):
-  """Proportional controller: (v, w) command toward a world waypoint."""
-  px, py, theta = pose
-  heading_err = wrap_angle(math.atan2(waypoint[1] - py, waypoint[0] - px) - theta)
-  w = max(-W_MAX, min(W_MAX, K_HEADING * heading_err))
-  v = V_MAX * max(0.0, math.cos(heading_err))   # pivot first, drive when aligned
-  return v, w
-
-
-def render_map(grid, pose, waypoints):
-  """Map image with overlays: blue planned path, red robot marker."""
-  img = np.stack([grid.to_image()] * 3, axis=-1)
-  for wx, wy in waypoints:
-    ix, iy = grid.world_to_cell(wx, wy)
-    img[iy, ix] = (60, 90, 220)
-  rix, riy = grid.world_to_cell(pose[0], pose[1])
-  img[max(0, riy - 1):riy + 2, max(0, rix - 1):rix + 2] = (220, 50, 50)
-  return np.flipud(img)
 
 
 def run(headless: bool, max_sim_time: float) -> None:
