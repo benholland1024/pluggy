@@ -1,8 +1,20 @@
 import math
 
-from pluggybot.mapping.landmarks import LandmarkStore
+import numpy as np
+
+from pluggybot.mapping.landmarks import LandmarkStore, wall_normal
+from pluggybot.mapping.occupancy_grid import OccupancyGrid
 
 SEEN = (0.0, 0.0)   # a default observer position for tests that don't care
+
+
+def _grid_with_wall_below_y0():
+  """A map whose y > 0 half is known-free and y <= 0 half is solid wall."""
+  grid = OccupancyGrid(x_min=-2, y_min=-2, x_max=2, y_max=2, resolution=0.05)
+  ys = np.arange(grid.grid.shape[0]) * grid.resolution + grid.y_min
+  grid.grid[ys > 0.0, :] = -1.0     # confidently free
+  grid.grid[ys <= 0.0, :] = 1.0     # confidently occupied
+  return grid
 
 
 def test_single_sighting_is_not_confirmed():
@@ -97,3 +109,41 @@ def test_nearest_confirmed_picks_closest_and_needs_confirmation():
 
 def test_nearest_confirmed_empty_store():
   assert LandmarkStore().nearest_confirmed(0.0, 0.0) is None
+
+
+def test_wall_normal_points_out_of_the_wall():
+  """The map knows which way a wall faces; the mean seen-from point only
+  knows where the robot drove. Measured end to end, seen-from put the
+  standoff heading 31 deg off the true normal and the map put it at 0.0."""
+  nx, ny = wall_normal(_grid_with_wall_below_y0(), 0.0, 0.0)
+  assert math.isclose(ny, 1.0, abs_tol=0.05)   # straight out of the wall
+  assert abs(nx) < 0.05                        # no sideways bias
+
+
+def test_wall_normal_flips_to_the_side_it_was_seen_from():
+  """A free-standing partition is open on both sides, so the free-cell sums
+  nearly cancel and the surviving direction may name the wrong face. The
+  robot demonstrably saw this outlet, so the side it was seen from decides."""
+  grid = _grid_with_wall_below_y0()
+  # Claim the outlet was observed from BELOW the wall (the solid side here),
+  # which is the disagreement the sign check exists to catch.
+  _, ny = wall_normal(grid, 0.0, 0.0, fallback=(0.0, -1.0))
+  assert ny < 0.0, "normal must stay in the hemisphere the outlet was seen from"
+
+
+def test_wall_normal_falls_back_when_nothing_is_mapped():
+  """An outlet seen from far off may sit in unmapped space: no free cells
+  nearby means no evidence, so the caller's fallback must win rather than
+  some arbitrary direction."""
+  blank = OccupancyGrid(x_min=-2, y_min=-2, x_max=2, y_max=2, resolution=0.05)
+  assert wall_normal(blank, 0.0, 0.0, fallback=(0.6, -0.8)) == (0.6, -0.8)
+
+
+def test_standoff_uses_a_supplied_direction_over_seen_from():
+  """Seen-from stays as the fallback, but an explicit normal must override
+  it -- that override is what fixed the 31 deg hand-off error."""
+  store = LandmarkStore()
+  lm = store.add_sighting(0.0, 0.0, 0.24, seen_from=(1.0, 1.0))   # 45 deg off
+  sx, sy, heading = lm.standoff(distance=0.6, direction=(1.0, 0.0))
+  assert math.isclose(sx, 0.6) and math.isclose(sy, 0.0, abs_tol=1e-9)
+  assert math.isclose(abs(heading), math.pi)   # facing back down -x

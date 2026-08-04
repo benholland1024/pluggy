@@ -15,6 +15,8 @@ any wall-normal geometry: see Landmark.standoff().
 
 import math
 
+from pluggybot.mapping.frontier import FREE_THRESH
+
 GATE_RADIUS = 0.4   # m: sightings closer than this (in 2D) are the same outlet.
                     # Odometry drift is <2% of path, outlets sit >1 m apart;
                     # z is excluded because it is the noisiest estimate and two
@@ -48,21 +50,65 @@ class Landmark:
     self.seen_from_x += (seen_from[0] - self.seen_from_x) * w
     self.seen_from_y += (seen_from[1] - self.seen_from_y) * w
 
-  def standoff(self, distance: float = 0.6) -> tuple[float, float, float]:
+  def standoff(self, distance: float = 0.6,
+               direction: tuple[float, float] | None = None,
+               ) -> tuple[float, float, float]:
     """The docking start pose: (x, y, heading) `distance` out from the
     outlet on its open side, facing it.
 
-    Direction comes from the mean seen-from point: the robot only ever saw
-    the outlet from in front of its wall, so outlet -> mean-seen-from points
-    into free space along (roughly) the wall normal. Heading points back at
-    the outlet — the pose the docking controller starts from.
+    `direction` is the outlet's outward normal. Prefer wall_normal() below,
+    which reads it off the map. Without one, this falls back to the mean
+    seen-from point — which only says where the robot happened to drive, and
+    was measured 31 deg off the true normal after a drive-by. Good enough to
+    tell which SIDE of the wall is open; not good enough to dock against.
     """
-    dx = self.seen_from_x - self.x
-    dy = self.seen_from_y - self.y
+    if direction is None:
+      dx, dy = self.seen_from_x - self.x, self.seen_from_y - self.y
+    else:
+      dx, dy = direction
     norm = math.hypot(dx, dy) or 1.0    # degenerate only if seen from inside the wall
     sx = self.x + distance * dx / norm
     sy = self.y + distance * dy / norm
     return sx, sy, math.atan2(self.y - sy, self.x - sx)
+
+
+def wall_normal(grid, x: float, y: float,
+                fallback: tuple[float, float] = (1.0, 0.0),
+                radii: tuple[float, ...] = (0.25, 0.35, 0.45),
+                n_dirs: int = 48) -> tuple[float, float]:
+  """Which way the wall under a landmark faces, read off the occupancy grid.
+
+  Sum a unit vector toward every nearby cell the map calls confidently free.
+  A wall blocks roughly half the circle, so the sum points out of it — no
+  line fitting needed. Sampling several radii keeps one noisy ring dominating.
+
+  `fallback` is the seen-from direction (outlet -> mean observer position). It
+  does two jobs, and both survive the map being more precise:
+
+    1. Fallback proper, when nothing nearby is known free — an outlet spotted
+       from across the room may sit in territory never driven through.
+    2. Sign check. A free-standing partition has open space on BOTH sides, so
+       the sums nearly cancel and whichever direction survives may point at
+       the wrong face. The robot physically saw this outlet, so the normal
+       must lie in the hemisphere it was seen from; when the map disagrees,
+       its axis is kept and the sign is flipped.
+  """
+  fx = fy = 0.0
+  rows, cols = grid.grid.shape
+  for r in radii:
+    for k in range(n_dirs):
+      a = 2 * math.pi * k / n_dirs
+      ix, iy = grid.world_to_cell(x + r * math.cos(a), y + r * math.sin(a))
+      if 0 <= ix < cols and 0 <= iy < rows and grid.grid[iy, ix] < FREE_THRESH:
+        fx += math.cos(a)
+        fy += math.sin(a)
+  norm = math.hypot(fx, fy)
+  if norm <= 1e-6:
+    return fallback
+  nx, ny = fx / norm, fy / norm
+  if nx * fallback[0] + ny * fallback[1] < 0.0:
+    nx, ny = -nx, -ny            # right wall, wrong face: flip to the seen side
+  return nx, ny
 
 
 class LandmarkStore:

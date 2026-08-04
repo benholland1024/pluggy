@@ -96,5 +96,40 @@ def test_leaving_explore_with_an_outlet_goes_to_charge(sim):
   sim.leave_explore("battery-low")
   assert sim.state == "GO_CHARGE"
   assert sim.target is not None
-  sx, sy, _ = sim.target.standoff()
+  sx, sy, _ = sim.standoff_of(sim.target)
   assert sx > -1.99, "standoff must sit on the room side of the outlet"
+
+
+def test_go_charge_hands_off_on_arrival(sim):
+  """Standing on the standoff point must advance to FACE_OUTLET. Arrival is
+  checked before replanning: A* from the goal cell to itself returns a
+  one-cell path that follow_waypoints instantly empties, so replanning first
+  would oscillate between 'arrived' and 'replan' forever."""
+  # Odometry starts at the origin, so put the standoff point there: an outlet
+  # 0.6 m ahead whose wall faces back toward the robot.
+  sim.target = sim.landmarks.add_sighting(0.6, 0.0, 0.24, seen_from=(0.0, 0.0))
+  sim.standoff_dir = (-1.0, 0.0)
+  sim.waypoints = []
+  v, w = sim.go_charge()
+  assert sim.state == "FACE_OUTLET"
+  assert (v, w) == (0.0, 0.0)
+
+
+def test_face_outlet_turns_then_stops(sim, lifecycle_module):
+  """Pivot while misaligned, stop inside FACING_TOLERANCE. The tolerance is
+  the docking controller's yaw budget being spent, so it must be small."""
+  sim.state = "FACE_OUTLET"
+  # Outlet behind the robot: target heading is pi, odometry heading is 0.
+  sim.target = sim.landmarks.add_sighting(1.0, 0.0, 0.24, seen_from=(0.0, 0.0))
+  sim.standoff_dir = (1.0, 0.0)
+  v, w = sim.face_outlet()
+  assert sim.state == "FACE_OUTLET"           # still turning, not handed off
+  assert v == 0.0 and abs(w) > 0.0
+
+  # Outlet dead ahead of the robot's current heading: already squared up.
+  sim.target = sim.landmarks.add_sighting(-1.0, 0.0, 0.24, seen_from=(0.0, 0.0))
+  sim.standoff_dir = (-1.0, 0.0)
+  v, w = sim.face_outlet()
+  assert sim.state == "DONE"
+  assert (v, w) == (0.0, 0.0)
+  assert abs(sim.final_heading_error) <= lifecycle_module.FACING_TOLERANCE

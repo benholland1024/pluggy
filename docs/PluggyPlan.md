@@ -43,9 +43,9 @@ The core idea: a small wheeled robot with stereo vision that explores its enviro
 2. ✅ Stereo camera pair rendering from the robot *(July 2026)*
 3. ✅ Classical odometry — dead reckoning from wheel angles, verified <2 % against ground truth on straights, spins, arcs, and S-curves *(July 2026; IMU/EKF fusion deferred until drift actually hurts)*
 4. ✅ Occupancy mapping + frontier exploration — log-odds grid from a virtual laser scan (depth-image center row), gyro-fused odometry, A* over inflated free space, autonomous frontier exploration with look-around spins; maps both rooms collision-free and self-terminates *(July 2026)*
-5. Outlet detector trained on synthetic data
-6. Docking controller (scripted baseline → RL)
-7. Battery model + state machine tying the full loop together: explore → detect → approach → dock → charge
+5. ✅ Outlet detector trained on synthetic data — YOLO11n on 1200 domain-randomized renders with free segmentation-derived labels; generalizes to `room_1.xml` outlets it was never trained on (3/3 detected at 0.94–0.97 confidence, no false positive on the decoy switch). Detections project to world coordinates via depth and merge into a landmark map; a full mission parks at the docking hand-off pose within **0.5° yaw / 1.3 cm lateral** *(August 2026)*
+6. Docking controller (scripted baseline → RL) — de-risked: the contact spike measured the insertion envelope at **±3 mm lateral, ±3° yaw** with an honest 2 mm rim chamfer
+7. Battery model + state machine tying the full loop together: explore → detect → approach → dock → charge — the state machine exists (`scripts/lifecycle.py`: EXPLORE → GO_CHARGE → FACE_OUTLET); what remains is the battery model behind the `explore_budget` stand-in, and the charge state itself
 
 Each milestone is independently runnable and demoable.
 
@@ -75,4 +75,12 @@ pluggy/
 
 ## Status
 
-🚧 Milestones 1–4 complete (July 2026): teleoperable diff-drive base with a physics regression suite; stereo pair rendering with a parallax test; classical dead-reckoning odometry (<2 % error, gyro-fused for heading); and full autonomous mapping — virtual laser scanner from ground-truth depth, log-odds occupancy grid, A* path planning, frontier exploration (`scripts/explore.py` maps both rooms of `room_1.xml` collision-free and terminates on its own). Hardware is anchored to real EU-purchasable parts in [Parts.md](Parts.md); simulation lessons live in [SimNotes.md](SimNotes.md). Next: outlet detector on synthetic data (milestone 5 — the machine learning begins) and the plug/socket contact spike.
+🚧 **Milestones 1–5 complete.** August 2026: the outlet detector works end to end — synthetic
+dataset with segmentation-derived labels, YOLO11n trained on GPU, detections projected to
+world coordinates and merged into a landmark map, and `scripts/lifecycle.py` running the
+whole mission (explore → remember outlets → drive to the nearest → square up), parking at
+the docking hand-off pose within 0.5° and 1.3 cm of truth. The Schuko contact spike
+(`scripts/schuko_spike.py`) has priced milestone 6 at ±3 mm / ±3°. Next: the docking
+controller, plus the battery model that replaces the lifecycle's timer stand-in.
+
+Earlier — milestones 1–4 (July 2026): teleoperable diff-drive base with a physics regression suite; stereo pair rendering with a parallax test; classical dead-reckoning odometry (<2 % error, gyro-fused for heading); and full autonomous mapping — virtual laser scanner from ground-truth depth, log-odds occupancy grid, A* path planning, frontier exploration (`scripts/explore.py` maps both rooms of `room_1.xml` collision-free and terminates on its own). Hardware is anchored to real EU-purchasable parts in [Parts.md](Parts.md); simulation lessons live in [SimNotes.md](SimNotes.md). Next: outlet detector on synthetic data (milestone 5 — the machine learning begins) and the plug/socket contact spike.

@@ -95,13 +95,41 @@ def drive_toward(pose: Pose, waypoint: tuple[float, float]) -> tuple[float, floa
   return v, w
 
 
+PATH_COLOR = (60, 90, 220)          # blue: the planned route
+ROBOT_COLOR = (220, 50, 50)         # red: where the robot believes it is
+OUTLET_CONFIRMED_COLOR = (40, 205, 90)    # green: a landmark trusted enough to drive to
+OUTLET_TENTATIVE_COLOR = (130, 150, 55)   # olive: seen, but not yet confirmed
+
+
+def _stamp(img, grid, wx, wy, color, half=0):
+  """Paint a (2*half+1)-square block at a world point, clipped to the map.
+
+  Landmarks come from projected detections, which can land outside the grid
+  when a sighting is noisy -- unclipped, a negative index silently wraps and
+  paints a marker on the opposite edge of the map.
+  """
+  rows, cols = img.shape[:2]
+  ix, iy = grid.world_to_cell(wx, wy)
+  if not (0 <= ix < cols and 0 <= iy < rows):
+    return
+  img[max(0, iy - half):iy + half + 1, max(0, ix - half):ix + half + 1] = color
+
+
 def render_map(grid: OccupancyGrid, pose: Pose,
-               waypoints: list[tuple[float, float]]) -> np.ndarray:
-  """Map image with overlays: blue planned path, red robot marker."""
+               waypoints: list[tuple[float, float]],
+               landmarks=(), min_sightings: int = 3) -> np.ndarray:
+  """Map image with overlays: blue planned path, red robot, green outlets.
+
+  Outlets are drawn bright green once confirmed (>= min_sightings, matching
+  LandmarkStore.confirmed) and olive while still tentative, so the map shows
+  at a glance which memories the robot would actually act on.
+  """
   img = np.stack([grid.to_image()] * 3, axis=-1)
   for wx, wy in waypoints:
-    ix, iy = grid.world_to_cell(wx, wy)
-    img[iy, ix] = (60, 90, 220)
-  rix, riy = grid.world_to_cell(pose[0], pose[1])
-  img[max(0, riy - 1):riy + 2, max(0, rix - 1):rix + 2] = (220, 50, 50)
+    _stamp(img, grid, wx, wy, PATH_COLOR)
+  for lm in landmarks:
+    color = (OUTLET_CONFIRMED_COLOR if lm.n_sightings >= min_sightings
+             else OUTLET_TENTATIVE_COLOR)
+    _stamp(img, grid, lm.x, lm.y, color, half=1)
+  _stamp(img, grid, pose[0], pose[1], ROBOT_COLOR, half=1)
   return np.flipud(img)

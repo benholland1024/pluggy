@@ -72,6 +72,46 @@ The original 30:1/1.4 N·m spec on a 1.1 kg robot demands ~40 N of thrust per wh
   is behind the robot.
 - **Termination is "no *reachable* frontiers," not "no frontiers."** Unreachable slivers (pockets inside obstacles, hairline gaps) are blacklisted when A* fails; exploration ends after a look-around spin plus repeated pathless replans. Benchmark: both rooms of room_1.xml in ~80 sim-seconds, 0 chassis contacts.
 
+## Landmark & docking-approach lessons (milestone 5→6)
+
+### "Where I saw it from" is not "which way it faces"
+The first standoff-pose estimate derived the outlet's outward normal from the mean
+robot position across sightings. It sounds sound — the robot only ever sees an outlet
+from the open side — but it records *where the robot happened to drive*, and a drive-by
+biases it badly. Measured end to end: **31.2° off the true wall normal**, which put the
+docking hand-off pose 33 cm sideways with the socket at the very edge of the camera's
+66° horizontal FOV. The fix reads the normal off the occupancy grid instead
+(`landmarks.wall_normal`): sum a unit vector toward every nearby known-free cell, and
+since a wall blocks half the circle the sum points out of it — no line fitting, no
+normal-direction ambiguity. **31.2° → 0.0°.** Seen-from survives only as the fallback
+for outlets whose surroundings were never mapped.
+
+Meta-lesson: **decompose an error before fixing it.** The 33° miss was first written off
+as odometry drift. Splitting it into controller settle / odometry drift / direction
+estimate showed drift was **0.02°** (the gyro fusion is excellent) and the estimator
+owned essentially all of it. Guessing would have wasted the effort on the wrong subsystem.
+
+### The camera's FOV, not the wall, bounds usable outlet height
+With the eye fixed at z = 0.18 m and fovy 41°, the visible band is z ≤ 0.40 m at the
+0.6 m standoff but only z ≤ 0.31 m at 0.35 m. Verified in `room_1.xml`: outlet C at
+0.38 m is detected at 0.6 m (conf 0.93) and **disappears entirely at 0.35 m**. So the
+approach can see a high outlet and then lose it exactly when it matters — the concrete
+argument for the prismatic lift in milestone 6, and outlet C is deliberately left high
+as the test case. Room walls are 1.20 m (was 0.30 m), which also puts them inside the
+detector's trained wall-height range of 0.5–1.5 m.
+
+### The sighting threshold earns its keep
+Drawing tentative landmarks on `map.png` in olive immediately exposed one: the detector
+fires on `decoy_switch_w` (a light switch) about twice per run, at the right position
+and height. `min_sightings=3` filters it, and it never reaches the confirmed list. Worth
+remembering that the detector's precision on the val set (0.98) is not zero false
+positives in the world — the confirmation count is what makes the landmark map clean.
+
+### Budget the tolerance across the whole chain, not per-stage
+`FACING_TOLERANCE` was 2° against the spike's ±3° docking budget — the settle criterion
+alone spent two-thirds of the allowance before odometry or the docking controller got
+any. At 0.5° the full pipeline now parks at **-0.49° yaw, 1.3 cm lateral, 60 cm out**.
+
 ## Rendering lessons (milestone 5)
 
 ### Segmentation rendering needs `offsamples="0"`

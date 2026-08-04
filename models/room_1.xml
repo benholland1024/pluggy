@@ -41,33 +41,33 @@
     <!--  Walls  -->
     
     <!-- Wall north (red)  -->
-    <body name="wall-north" pos="2.0 6.0 0.15">
-      <geom type="box" size="4.0 0.01 0.15" rgba="0.8 0.2 0.2 1"/>
+    <body name="wall-north" pos="2.0 6.0 0.6">
+      <geom type="box" size="4.0 0.01 0.6" rgba="0.8 0.2 0.2 1"/>
     </body>
 
     <!-- Wall east (green) -->
-    <body name="wall-east" pos="6.0 2.0 0.15">
-      <geom type="box" size="0.01 4.0 0.15" rgba="0.2 0.8 0.2 1"/>
+    <body name="wall-east" pos="6.0 2.0 0.6">
+      <geom type="box" size="0.01 4.0 0.6" rgba="0.2 0.8 0.2 1"/>
     </body>
 
     <!-- Wall south (blue)  -->
-    <body name="wall-south" pos="2.0 -2.0 0.15">
-      <geom type="box" size="4.0 0.01 0.15" rgba="0.2 0.2 0.8 1"/>
+    <body name="wall-south" pos="2.0 -2.0 0.6">
+      <geom type="box" size="4.0 0.01 0.6" rgba="0.2 0.2 0.8 1"/>
     </body>
 
     <!-- Wall west (yellow) -->
-    <body name="wall-west" pos="-2.0 2.0 0.15">
-      <geom type="box" size="0.01 4.0 0.15" rgba="0.8 0.8 0.2 1"/>
+    <body name="wall-west" pos="-2.0 2.0 0.6">
+      <geom type="box" size="0.01 4.0 0.6" rgba="0.8 0.8 0.2 1"/>
     </body>
 
     <!-- Wall divider top (purple) -->
-    <body name="wall-divider-top" pos="2.0 5.0 0.15">
-      <geom type="box" size="0.01 1.0 0.15" rgba="0.8 0.2 0.8 1"/>
+    <body name="wall-divider-top" pos="2.0 5.0 0.6">
+      <geom type="box" size="0.01 1.0 0.6" rgba="0.8 0.2 0.8 1"/>
     </body>
 
     <!-- Wall divider bottom (cyan) -->
-    <body name="wall-divider-bottom" pos="2.0 0.0 0.15">
-      <geom type="box" size="0.01 2.0 0.15" rgba="0.2 0.8 0.8 1"/>
+    <body name="wall-divider-bottom" pos="2.0 0.0 0.6">
+      <geom type="box" size="0.01 2.0 0.6" rgba="0.2 0.8 0.8 1"/>
     </body>
 
     <!--  Obstacles  -->
@@ -101,13 +101,24 @@
           geometry later, when milestone 6 needs it.
 
           Placement: body sits wall_face + 0.004 out (plate back flush with
-          the wall). Walls are 0.3 m tall, so outlet centers stay ≤0.26 m;
-          heights 0.23–0.25 sit inside the trained 0.22–0.45 band.
-          euler: 0 faces +x, 90 faces +y (matches outlet_scene wall frames).
+          the wall). euler: 0 faces +x, 90 faces +y (matches outlet_scene's
+          wall frames).
+
+          Heights 0.26 / 0.30 / 0.38 m, deliberately spread. Three ceilings
+          bound that range, and the tightest one is not the wall:
+            * German domestic sockets sit ~0.30 m in living areas (the 1.05 m
+              worktop height is a different fixture) -- so this is realistic;
+            * the detector was trained on outlet heights 0.22-0.45 m;
+            * the CAMERA is the real limit. It is fixed at z = 0.18 m with a
+              41 deg vertical FOV, so it sees z <= 0.40 m at the 0.6 m
+              standoff but only z <= 0.31 m at 0.35 m range. Outlet C at
+              0.38 m therefore leaves frame during a close approach -- which
+              is exactly the job of the prismatic lift in milestone 6, and a
+              useful case to have in the world before building it.
     -->
 
     <!-- Outlet A: west wall, room 1. Bright white, slightly oversized plate. -->
-    <body name="outlet_a" pos="-1.986 1.0 0.24" euler="0 0 0">
+    <body name="outlet_a" pos="-1.986 1.0 0.26" euler="0 0 0">
       <geom name="outlet_a_plate" type="box" size="0.004 0.042 0.042"
             rgba="0.97 0.96 0.94 1" contype="0" conaffinity="0"/>
       <geom name="outlet_a_well" type="cylinder" size="0.028 0.0015" zaxis="1 0 0"
@@ -125,7 +136,7 @@
     </body>
 
     <!-- Outlet B: south wall, room 1. Warm cream, slightly undersized plate. -->
-    <body name="outlet_b" pos="0.5 -1.986 0.23" euler="0 0 90">
+    <body name="outlet_b" pos="0.5 -1.986 0.30" euler="0 0 90">
       <geom name="outlet_b_plate" type="box" size="0.004 0.038 0.038"
             rgba="0.89 0.86 0.79 1" contype="0" conaffinity="0"/>
       <geom name="outlet_b_well" type="cylinder" size="0.028 0.0015" zaxis="1 0 0"
@@ -143,7 +154,7 @@
     </body>
 
     <!-- Outlet C: east wall, room 2. Cool light gray, standard plate. -->
-    <body name="outlet_c" pos="5.986 4.5 0.25" euler="0 0 180">
+    <body name="outlet_c" pos="5.986 4.5 0.38" euler="0 0 180">
       <geom name="outlet_c_plate" type="box" size="0.004 0.04 0.04"
             rgba="0.84 0.85 0.86 1" contype="0" conaffinity="0"/>
       <geom name="outlet_c_well" type="cylinder" size="0.028 0.0015" zaxis="1 0 0"
@@ -164,7 +175,7 @@
           The detector must stay silent on all of these.  -->
 
     <!-- Light switch: west wall, room 1 (plate + rocker) -->
-    <body name="decoy_switch_w" pos="-1.986 3.0 0.23" euler="0 0 0">
+    <body name="decoy_switch_w" pos="-1.986 3.0 0.34" euler="0 0 0">
       <geom name="decoy_switch_w_plate" type="box" size="0.004 0.04 0.04"
             rgba="0.92 0.91 0.88 1" contype="0" conaffinity="0"/>
       <geom name="decoy_switch_w_rocker" type="box" size="0.004 0.018 0.026"
@@ -172,17 +183,17 @@
     </body>
 
     <!-- Blank plate: south wall, room 2 -->
-    <body name="decoy_blank_s" pos="4.5 -1.986 0.23" euler="0 0 90">
+    <body name="decoy_blank_s" pos="4.5 -1.986 0.28" euler="0 0 90">
       <geom name="decoy_blank_s_plate" type="box" size="0.004 0.04 0.04"
             rgba="0.88 0.88 0.90 1" contype="0" conaffinity="0"/>
     </body>
 
     <!-- Pictures: north wall room 1, east wall room 2 -->
-    <body name="decoy_pic_n" pos="0.5 5.988 0.20" euler="0 0 270">
+    <body name="decoy_pic_n" pos="0.5 5.988 0.42" euler="0 0 270">
       <geom name="decoy_pic_n_canvas" type="box" size="0.002 0.10 0.06"
             rgba="0.35 0.48 0.72 1" contype="0" conaffinity="0"/>
     </body>
-    <body name="decoy_pic_e" pos="5.988 1.0 0.20" euler="0 0 180">
+    <body name="decoy_pic_e" pos="5.988 1.0 0.36" euler="0 0 180">
       <geom name="decoy_pic_e_canvas" type="box" size="0.002 0.14 0.08"
             rgba="0.62 0.33 0.30 1" contype="0" conaffinity="0"/>
     </body>

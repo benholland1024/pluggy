@@ -28,10 +28,12 @@ from PIL import Image
 from pluggybot.behavior.navigation import (
   BACKOFF_TIME,
   FRONT_STOP_RANGE,
+  K_HEADING,
   MAP_SAVE_PERIOD,
   REPLAN_PERIOD,
   SCAN_EVERY,
   STRIKES_TO_FINISH,
+  W_MAX,
   W_SPIN,
   WAYPOINT_RADIUS,
   drive_toward,
@@ -39,8 +41,10 @@ from pluggybot.behavior.navigation import (
   plan,
   render_map,
 )
-from pluggybot.control import wheel_targets, slew
-from pluggybot.mapping.landmarks import LandmarkStore
+from pluggybot.control import wheel_targets, slew, wrap_angle
+from pluggybot.mapping.astar import astar
+from pluggybot.mapping.frontier import traversable_mask
+from pluggybot.mapping.landmarks import LandmarkStore, wall_normal
 from pluggybot.mapping.occupancy_grid import OccupancyGrid
 from pluggybot.odometry.dead_reckoning import DeadReckoner
 from pluggybot.perception.outlet_spotter import OutletSpotter, latest_weights
@@ -51,6 +55,15 @@ State = Literal["EXPLORE", "GO_CHARGE", "FACE_OUTLET", "DONE"]
 SPOT_PERIOD = 0.5        # sim seconds between YOLO looks (outlets don't move)
 EXPLORE_BUDGET = 60.0    # sim seconds before the battery stand-in calls for a charge
 BACKOFF_SPEED = -0.15    # m/s straight reverse when the safety reflex trips
+
+STANDOFF_DISTANCE = 0.6  # m out from the outlet: where docking will take over
+STANDOFF_RETRY_STEP = 0.15   # m further out when no route to the standoff exists
+ARRIVE_RADIUS = 0.12     # m: close enough to the standoff point to stop driving
+CHARGE_STRIKES = 6       # pathless replans before giving up on this outlet
+# Docking tolerates +/-3 deg of yaw (schuko_spike.py), so settling at 2 deg
+# spent the whole budget on the controller alone. 0.5 deg leaves the margin
+# for odometry drift and the docking controller's own error.
+FACING_TOLERANCE = math.radians(0.5)
 
 
 class Lifecycle:
@@ -102,6 +115,10 @@ class Lifecycle:
     self.state: State = "EXPLORE"
     self.target = None                 # the Landmark being driven to
     self.explore_done_reason = "running"
+    self.standoff_distance = STANDOFF_DISTANCE
+    self.standoff_dir: tuple[float, float] | None = None
+    self.charge_strikes = 0
+    self.final_heading_error: float | None = None
 
     # -- shared navigation state
     self.waypoints: list[tuple[float, float]] = []
@@ -182,6 +199,40 @@ class Lifecycle:
     self.mode = "spin"
     self.spin_remaining = 2 * math.pi
 
+  def standoff_of(self, lm) -> tuple[float, float, float]:
+    """A landmark's docking hand-off pose, using the map-derived wall normal.
+
+    The normal is cached in self.standoff_dir for the current target: it costs
+    ~150 grid lookups and is wanted on every step of GO_CHARGE, and the wall
+    it describes does not move.
+    """
+    if lm is self.target and self.standoff_dir is not None:
+      return lm.standoff(self.standoff_distance, direction=self.standoff_dir)
+    d = wall_normal(self.grid, lm.x, lm.y,
+                    fallback=(lm.seen_from_x - lm.x, lm.seen_from_y - lm.y))
+    return lm.standoff(self.standoff_distance, direction=d)
+
+  def plan_to(self, wx: float, wy: float) -> bool:
+    """A* from the robot's cell to a world point; fills self.waypoints.
+
+    Returns False when no route exists -- the caller decides whether that
+    means "wait for a better map" or "give up". Same planner explore() uses
+    via navigation.plan(); the only difference is a fixed goal instead of a
+    frontier search.
+    """
+    trav = traversable_mask(self.grid.grid)
+    rows, cols = trav.shape
+    rix, riy = self.grid.world_to_cell(self.pose[0], self.pose[1])
+    start = (min(max(rix, 0), cols - 1), min(max(riy, 0), rows - 1))
+    goal = self.grid.world_to_cell(wx, wy)
+    if not (0 <= goal[0] < cols and 0 <= goal[1] < rows):
+      return False
+    path = astar(trav, start, goal)     # None if the goal cell isn't traversable
+    if path is None:
+      return False
+    self.waypoints = path_to_waypoints(self.grid, path)
+    return True
+
   # ---- mission phases ------------------------------------------------------
   # Each returns the (v, w) command for this step and may reassign self.state.
 
@@ -227,46 +278,67 @@ class Lifecycle:
     self.target = self.landmarks.nearest_confirmed(self.pose[0], self.pose[1])
     self.state = "GO_CHARGE" if self.target is not None else "DONE"
     self.waypoints = []
+    if self.target is not None:
+      # Read the wall's facing off the finished map, once, and reuse it.
+      self.standoff_dir = wall_normal(
+        self.grid, self.target.x, self.target.y,
+        fallback=(self.target.seen_from_x - self.target.x,
+                  self.target.seen_from_y - self.target.y))
     print(f"t={self.data.time:6.1f}s  EXPLORE -> {self.state}  ({reason}; "
           f"{len(self.landmarks.confirmed())} outlet(s) remembered)")
     return 0.0, 0.0
 
   def go_charge(self) -> tuple[float, float]:
-    """TODO(Ben): drive to self.target.standoff().
+    """Drive to the standoff point in front of the target outlet.
 
-    Sketch -- it is mostly the same shape as explore()'s decide/act split:
-      * goal = self.target.standoff()  -> (x, y, heading); plan to the (x, y).
-      * Replan on the REPLAN_PERIOD cadence like explore does, because the
-        map (and the reflex) can invalidate the path underneath you.
-      * To plan: traversable_mask(self.grid.grid) -> astar(trav, robot_cell,
-        goal_cell) -> path_to_waypoints(self.grid, path). Both imports come
-        from pluggybot.mapping; grid.world_to_cell does the conversion.
-      * Then `return self.follow_waypoints()`.
-      * Arrival: waypoints empty AND within ~WAYPOINT_RADIUS of the standoff
-        point -> self.state = "FACE_OUTLET".
-      * If astar returns None, just wait for the next replan tick -- the map
-        keeps improving. Give up after a few strikes so it can't hang.
-
-    Watch out: the standoff point may land inside the wall's inflation ring
-    if the landmark estimate is a few cm off. If A* keeps failing, retry at a
-    slightly larger standoff distance before declaring it unreachable.
+    Same decide/act split as explore(); the only difference is that the goal
+    is a fixed point rather than whichever frontier is nearest.
     """
-    self.state = "DONE"
-    return 0.0, 0.0
+    d = self.data
+    gx, gy, _ = self.standoff_of(self.target)
+
+    # Arrival is checked BEFORE replanning: standing on the goal makes A*
+    # return a one-cell path, which follow_waypoints immediately empties --
+    # replanning first would spin between "arrived" and "replan" forever.
+    if not self.waypoints and math.hypot(gx - self.pose[0], gy - self.pose[1]) < ARRIVE_RADIUS:
+      print(f"t={d.time:6.1f}s  GO_CHARGE -> FACE_OUTLET  (at standoff, "
+            f"{self.standoff_distance:.2f} m out)")
+      self.state = "FACE_OUTLET"
+      return 0.0, 0.0
+
+    if d.time >= self.next_replan or not self.waypoints:
+      self.next_replan = d.time + REPLAN_PERIOD
+      if self.plan_to(gx, gy):
+        self.charge_strikes = 0
+      else:
+        # Usually the standoff cell sits inside the wall's inflation ring:
+        # the landmark is a few cm off, or the outlet is in a tight corner.
+        # Backing the goal away from the wall is what makes it reachable.
+        self.charge_strikes += 1
+        self.standoff_distance += STANDOFF_RETRY_STEP
+        if self.charge_strikes >= CHARGE_STRIKES:
+          print(f"t={d.time:6.1f}s  GO_CHARGE -> DONE  (no route to any "
+                f"standoff pose after {CHARGE_STRIKES} tries)")
+          self.state = "DONE"
+        return 0.0, 0.0
+
+    return self.follow_waypoints()
 
   def face_outlet(self) -> tuple[float, float]:
-    """TODO(Ben): pivot in place until squared up with the outlet, then stop.
+    """Pivot in place until squared up with the outlet, then stop.
 
-    Sketch:
-      * _, _, want = self.target.standoff()
-      * err = wrap_angle(want - self.pose[2])   (from pluggybot.control)
-      * while abs(err) > ~2 degrees: return (0.0, clamped K_HEADING * err)
-      * then self.state = "DONE" and return (0.0, 0.0).
-
-    The spike measured docking tolerance at +/-3 degrees of yaw, so this is
-    the step whose accuracy actually matters -- worth printing the final
-    heading error to see what the odometry gives you.
+    The end of the mission as far as this milestone goes: the robot is parked
+    at the standoff pose, facing the socket. The docking controller
+    (milestone 6) takes over from exactly here, and the spike measured its
+    yaw budget at +/-3 deg -- so this is the step whose accuracy matters.
     """
+    _, _, want = self.standoff_of(self.target)
+    err = wrap_angle(want - self.pose[2])
+    if abs(err) > FACING_TOLERANCE:
+      return 0.0, max(-W_MAX, min(W_MAX, K_HEADING * err))
+    self.final_heading_error = err
+    print(f"t={self.data.time:6.1f}s  FACE_OUTLET -> DONE  (believed heading "
+          f"error {math.degrees(err):+.2f} deg)")
     self.state = "DONE"
     return 0.0, 0.0
 
@@ -313,24 +385,87 @@ class Lifecycle:
     t = self.data.time
     if t - self.last_save >= MAP_SAVE_PERIOD:
       self.last_save = t
-      Image.fromarray(render_map(self.grid, self.pose, self.waypoints)).save("map.png")
+      Image.fromarray(render_map(self.grid, self.pose, self.waypoints,
+                                  self.landmarks.landmarks)).save("map.png")
     if self.headless and t - self.last_report >= 30.0:
       self.last_report = t
       known = int(np.count_nonzero(np.abs(self.grid.grid) > 0.5))
       print(f"t={t:6.1f}s  {self.state:<11s} mode={self.mode:<5s} "
             f"known cells={known}  outlets={len(self.landmarks.confirmed())}")
 
+  def true_axle_pose(self) -> tuple[float, float, float]:
+    """Ground-truth (x, y, yaw) of the axle midpoint, from qpos rather than
+    odometry. qpos tracks the body origin 8 cm ahead of the axle."""
+    x, y = float(self.data.qpos[0]), float(self.data.qpos[1])
+    w, qx, qy, qz = (float(v) for v in self.data.qpos[3:7])
+    yaw = math.atan2(2 * (w * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+    return x - 0.08 * math.cos(yaw), y - 0.08 * math.sin(yaw), yaw
+
+  def dock_report(self) -> None:
+    """Score the parked pose against ground truth, in the terms the docking
+    spike measured: how far off the socket axis, and how badly rotated.
+
+    Everything upstream (detection, projection, odometry) is believed data;
+    this is the only place the true answer is consulted.
+    """
+    if self.target is None:
+      return
+    names = ("outlet_a", "outlet_b", "outlet_c")
+    name = min(names, key=lambda n: math.hypot(
+      self.model.body(n).pos[0] - self.target.x,
+      self.model.body(n).pos[1] - self.target.y))
+    bid = self.model.body(name).id
+    ox, oy = float(self.data.xpos[bid][0]), float(self.data.xpos[bid][1])
+    # The outlet body's local +x is its outward normal (see room_1.xml).
+    nx, ny = float(self.data.xmat[bid][0]), float(self.data.xmat[bid][3])
+
+    rx, ry, ryaw = self.true_axle_pose()
+    dx, dy = rx - ox, ry - oy
+    along = dx * nx + dy * ny            # true standoff distance from the wall
+    lateral = -dx * ny + dy * nx         # offset along the wall (the miss)
+    yaw_err = wrap_angle(math.atan2(-ny, -nx) - ryaw)
+
+    print(f"\ndocking hand-off pose (truth, vs {name}):")
+    print(f"  standoff from wall : {along * 100:6.1f} cm")
+    print(f"  lateral offset     : {lateral * 100:+6.1f} cm   (spike budget at "
+          f"contact: +/-0.3 cm)")
+    print(f"  yaw error          : {math.degrees(yaw_err):+6.2f} deg  (spike budget: "
+          f"+/-3 deg)")
+    # Attribute that yaw error to its three independent sources, so a bad
+    # number points at the subsystem to fix instead of at "something drifted".
+    if self.final_heading_error is not None:
+      _, _, want = self.standoff_of(self.target)
+      odom_drift = wrap_angle(self.reckoner.theta - ryaw)
+      dir_err = wrap_angle(want - math.atan2(-ny, -nx))
+      print("  yaw error breakdown:")
+      print(f"    controller settle  : {math.degrees(self.final_heading_error):+6.2f} deg"
+            "  (robot vs its own target heading)")
+      print(f"    odometry drift     : {math.degrees(odom_drift):+6.2f} deg"
+            "  (believed heading vs true)")
+      print(f"    standoff direction : {math.degrees(dir_err):+6.2f} deg"
+            "  (seen-from estimate vs true wall normal)")
+
   def summarize(self) -> None:
-    Image.fromarray(render_map(self.grid, self.pose, [])).save("map.png")
+    Image.fromarray(render_map(self.grid, self.pose, [],
+                                self.landmarks.landmarks)).save("map.png")
     known = int(np.count_nonzero(np.abs(self.grid.grid) > 0.5))
     print(f"\nended after {self.data.time:.1f} sim-seconds in state {self.state}"
           f" (explore: {self.explore_done_reason})")
     print(f"known cells: {known}   frontiers blacklisted: {len(self.blacklist)}")
     print(f"chassis-contact steps (should be 0): {self.collision_steps}")
-    for lm in self.landmarks.confirmed():
-      sx, sy, sh = lm.standoff()
-      print(f"  outlet ({lm.x:+.2f}, {lm.y:+.2f}, z={lm.z:.2f}) seen x{lm.n_sightings}"
-            f"  standoff ({sx:+.2f}, {sy:+.2f}) hdg {math.degrees(sh):+.0f} deg")
+    # Every landmark, not just the confirmed ones: the tentative ones are on
+    # map.png in olive, and they are usually the detector's false positives
+    # being filtered by the sighting threshold -- worth seeing.
+    confirmed = set(id(lm) for lm in self.landmarks.confirmed())
+    for lm in self.landmarks.landmarks:
+      if id(lm) in confirmed:
+        sx, sy, sh = self.standoff_of(lm)
+        print(f"  outlet    ({lm.x:+.2f}, {lm.y:+.2f}, z={lm.z:.2f}) seen x{lm.n_sightings:<3d}"
+              f" standoff ({sx:+.2f}, {sy:+.2f}) hdg {math.degrees(sh):+.0f} deg")
+      else:
+        print(f"  tentative ({lm.x:+.2f}, {lm.y:+.2f}, z={lm.z:.2f}) seen x{lm.n_sightings:<3d}"
+              f" not trusted (needs 3 sightings)")
+    self.dock_report()
     print("final map saved to map.png")
 
 
