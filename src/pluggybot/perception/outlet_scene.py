@@ -20,6 +20,11 @@ OUTLET_PREFIX = "outlet_"
 MIN_LABEL_PIXELS = 60       # an outlet smaller than this is unlearnable; reroll
 IMG_W, IMG_H = 640, 360     # 16:9 to match the robot camera's aspect (fovy 41)
 
+DIST_MIN = 0.15   # m: closer than the chassis can physically put the eye (~0.17 m)
+DIST_MAX = 2.5    # m: beyond this a Schuko plate is <20 px -- unlearnable
+CAM_Z_MAX = 0.50  # m: robot eye is fixed at 0.18 m; headroom for the lift
+DECOY_AIM_FRACTION = 0.6   # of negatives that point straight at a wall decoy
+
 
 def outlet_xml(x, y, z, facing_deg):
   """A German Schuko socket from primitives. facing_deg: 0 faces +x, 90 faces +y.
@@ -122,6 +127,7 @@ def random_scene_xml(rng, with_outlet=True):
     info.update(outlet_pos=(ox, oy, height), wall=wall)
 
   # -- wall decoys (hard negatives) and pictures
+  decoys = []                                    # (x, y, z, facing) for aiming at
   for i in range(int(rng.integers(0, 4))):
     wall = int(rng.integers(4))
     length = W if wall in (0, 2) else D
@@ -139,6 +145,7 @@ def random_scene_xml(rng, with_outlet=True):
     else:
       body_parts.append(_picture_xml(i, dx, dy, mount_z, facing,
                                      rng.uniform(0.08, 0.3), rng.uniform(0.05, 0.12), _rgba(rng)))
+    decoys.append((dx, dy, mount_z, facing))
 
   # -- floor clutter
   for i in range(int(rng.integers(0, 5))):
@@ -149,17 +156,51 @@ def random_scene_xml(rng, with_outlet=True):
           pos="{bx:.3f} {by:.3f} {hz:.3f}" rgba="{_rgba(rng)}" contype="0" conaffinity="0"/>""")
 
   # -- camera
-  cam_z = rng.uniform(0.10, 0.35)
+  # Height spans the robot's fixed eye (0.18 m) through where a prismatic lift
+  # will carry it during docking (milestone 6).
+  cam_z = rng.uniform(0.10, CAM_Z_MAX)
   if with_outlet:
     ox, oy, oz = info["outlet_pos"]
     normal = math.radians(frames[info["wall"]][0])
     for _ in range(50):
       ang = normal + math.radians(rng.uniform(-60, 60))
-      dist = rng.uniform(0.35, 2.5)   # beyond ~2.5 m a Schuko plate is <20 px: unlearnable
+      # Log-uniform, not uniform: apparent size goes as 1/d^2, so sampling
+      # distance uniformly crowds the far, tiny end and starves the near one.
+      # Log spacing covers scale evenly -- ~30 % of samples land inside 0.35 m
+      # versus ~8 % uniform. That near band is where docking lives, and the
+      # old 0.35 m floor is exactly where the detector started missing an
+      # outlet occupying 18 000 visible pixels.
+      dist = math.exp(rng.uniform(math.log(DIST_MIN), math.log(DIST_MAX)))
       cx, cy = ox + dist * math.cos(ang), oy + dist * math.sin(ang)
       if 0.15 < cx < W - 0.15 and 0.15 < cy < D - 0.15:
         break
     look = (ox + rng.uniform(-0.1, 0.1), oy + rng.uniform(-0.1, 0.1), oz + rng.uniform(-0.08, 0.08))
+    cam_pos = (cx, cy, cam_z)
+  elif decoys and rng.random() < DECOY_AIM_FRACTION:
+    # Aim a negative squarely at a decoy, at the SAME distances outlets are
+    # sampled at. Hard negatives are only hard if the detector meets them at
+    # the scale it meets outlets: widening the outlet range alone taught it
+    # close-up outlets but never a close-up light switch, and it promptly
+    # started calling one an outlet at 0.78 confidence from 0.40 m.
+    # Decoys sit >=0.25 m from the outlet along a wall, so a close-range
+    # POSITIVE frame pushes them out of shot -- negatives must carry this.
+    dx, dy, dz, dfacing = decoys[int(rng.integers(len(decoys)))]
+    normal = math.radians(dfacing)
+    cx, cy = dx, dy
+    for _ in range(50):
+      ang = normal + math.radians(rng.uniform(-60, 60))
+      dist = math.exp(rng.uniform(math.log(DIST_MIN), math.log(DIST_MAX)))
+      cx, cy = dx + dist * math.cos(ang), dy + dist * math.sin(ang)
+      if 0.15 < cx < W - 0.15 and 0.15 < cy < D - 0.15:
+        break
+    # Keep the aim tight. A distance-scaled jitter (0.42*dist, meant to train
+    # on decoys cropped by the frame edge) was tried and MEASURED WORSE: it
+    # pushed the decoy out of shot in 22 % of negatives, diluting the hard
+    # negatives it was supposed to sharpen, and per-frame false positives on
+    # room_1 went 0.127 -> 0.213 with decoy false positives tripling.
+    # See scripts/eval_detector.py; don't reintroduce without measuring.
+    look = (dx + rng.uniform(-0.1, 0.1), dy + rng.uniform(-0.1, 0.1),
+            dz + rng.uniform(-0.08, 0.08))
     cam_pos = (cx, cy, cam_z)
   else:
     cam_pos = (rng.uniform(0.3, W - 0.3), rng.uniform(0.3, D - 0.3), cam_z)

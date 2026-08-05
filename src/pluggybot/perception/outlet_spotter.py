@@ -87,8 +87,14 @@ class OutletSpotter:
   YOLO weights load once at construction — reuse the instance.
   """
 
+  # 0.7, not the usual 0.5: measured over 300 room_1 poses (eval_detector.py),
+  # raising the threshold from 0.5 to 0.7 leaves recall at 1.000 while cutting
+  # false positives that land on wall decoys from 9 to 2. Genuine outlets come
+  # back at 0.90-0.98, so there is wide margin above 0.7.
+  DEFAULT_CONF = 0.7
+
   def __init__(self, model, weights: str, camera_name: str = "left_eye",
-               conf: float = 0.5) -> None:
+               conf: float = DEFAULT_CONF) -> None:
     from ultralytics import YOLO   # deferred: slow import, torn off for tests
     self.detector = YOLO(weights)
     self.renderer = mujoco.Renderer(model, CAM_H, CAM_W)

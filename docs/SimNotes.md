@@ -100,6 +100,39 @@ argument for the prismatic lift in milestone 6, and outlet C is deliberately lef
 as the test case. Room walls are 1.20 m (was 0.30 m), which also puts them inside the
 detector's trained wall-height range of 0.5–1.5 m.
 
+### The generator's own val split cannot measure the detector
+Training and validation images come from the same `outlet_scene.py` sampler, so the val
+split only measures what the generator already thought to vary. It reported **mAP50-95
+0.9938 while the detector was calling a light switch an outlet**. `scripts/eval_detector.py`
+exists for this: it samples collision-free robot poses throughout `room_1.xml`, renders
+what the camera would really see, and scores against segmentation ground truth. Every
+real defect in this milestone was found there or by the distance sweep — none by mAP.
+
+### A handful of poses is a smoke test, not a measurement
+Three data recipes were compared on an 8-pose spot check, and a decoy false positive
+moving 0.61 → 0.93 was read as a regression signal. At that sample size it is inside
+run-to-run training variance. Re-run over 300 poses the ranking was unambiguous
+(false positives per frame): original 0.140, +close-range 0.187, **+decoy-aimed negatives
+0.127**, +distance-scaled aim jitter 0.213. Compare recipes on hundreds of samples or
+don't compare them.
+
+### One measured mistake, kept as a warning
+Aiming negatives at decoys with a *distance-scaled* jitter was meant to teach the
+detector about decoys cropped by the frame edge. It measured worse: the wide jitter
+pushed the decoy out of shot in 22 % of negatives, diluting the hard negatives it was
+meant to sharpen (decoy false positives tripled, 9 → 26). Reverted to a tight aim.
+The lesson generalizes: **check what a generator change actually produced** — a contact
+sheet or a pixel-coverage histogram — before spending 18 minutes training on it.
+
+### Recall is recoverable; precision errors compound
+Raising the detector threshold 0.5 → 0.7 costs 2 detections in 105 (recall 0.952 →
+0.933) and removes 26 of 40 false positives that land on wall decoys. That trade is
+right *for this system* because the two errors are not symmetric: the robot sees each
+outlet 13+ times per run, so a miss is recovered on the next glance, but a *systematic*
+false positive on a fixed decoy accumulates sightings in the same place and graduates
+into a confirmed phantom landmark the robot will drive to. Tune the threshold against
+what the downstream consumer does with the errors, not against an F1 score.
+
 ### The sighting threshold earns its keep
 Drawing tentative landmarks on `map.png` in olive immediately exposed one: the detector
 fires on `decoy_switch_w` (a light switch) about twice per run, at the right position

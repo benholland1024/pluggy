@@ -37,6 +37,9 @@ Simulated self-charging robot in MuJoCo. Before doing anything, read:
 - Dataset (deterministic; `datasets/` is gitignored, and the generator wipes it
   first — regenerating into a dirty dir once contaminated 195 labels):
   `MUJOCO_GL=egl uv run python scripts/generate_outlet_dataset.py --count 1200`
+- Eval (the one that matters — the val split shares the training generator and
+  scored 0.99 mAP while calling a light switch an outlet):
+  `MUJOCO_GL=egl uv run python scripts/eval_detector.py --poses 1000`
 - Train: `uv run yolo detect train data=datasets/outlets/dataset.yaml model=yolo11n.pt epochs=50 imgsz=640`
   (torch is pinned to the cu128 index in `pyproject.toml`: the driver here is
   CUDA 12.8, and PyPI's default cu130 build silently falls back to CPU)
