@@ -50,7 +50,7 @@ from pluggybot.odometry.dead_reckoning import DeadReckoner
 from pluggybot.perception.outlet_spotter import OutletSpotter, latest_weights
 from pluggybot.perception.scanner import Scanner
 
-State = Literal["EXPLORE", "GO_CHARGE", "FACE_OUTLET", "DONE"]
+State = Literal["EXPLORE", "GO_CHARGE", "FACE_OUTLET", "DOCK", "DONE"]
 
 SPOT_PERIOD = 0.5        # sim seconds between YOLO looks (outlets don't move)
 EXPLORE_BUDGET = 60.0    # sim seconds before the battery stand-in calls for a charge
@@ -64,6 +64,44 @@ CHARGE_STRIKES = 6       # pathless replans before giving up on this outlet
 # spent the whole budget on the controller alone. 0.5 deg leaves the margin
 # for odometry drift and the docking controller's own error.
 FACING_TOLERANCE = math.radians(0.5)
+
+# ---- DOCK state (measured numbers; see SimNotes "Docking lessons") ----------
+DOCK_TIMESTEP = 0.001    # mm-scale contacts: the spike's stability floor
+DOCK_DROOP_COMP = 0.0078  # m: plug axis sags below the lift target under
+                          # gravity (lift servo + RCC springs). Calibrated in
+                          # sim; on hardware this is a calibration constant.
+DOCK_CREEP = 0.3         # wheel rad/s while servoing in (~13 mm/s)
+DOCK_PRESS = 0.1         # wheel rad/s pressing feelers on the wall (~2.2 N).
+                         # The press must EXCEED the arm cap or the arm pushes
+                         # the base backward and pays out slack forever (a
+                         # seated plug read as a timeout). Raising the press
+                         # instead of lowering the arm was tried and measured
+                         # worse: wheel torque reaction pitches the chassis
+                         # nose-down, sagging the plug ~1.6x the calibration.
+DOCK_ARM_FORCE = 2.5     # N: arm cap ~ the base's measured push budget.
+                         # Deliberately ABOVE the 2.2 N wheel press: the extra
+                         # authority lets the funnel finish correcting the last
+                         # few mm (1.8 N measured too weak to ride the chamfer).
+                         # The side effect -- a seated plug slowly pushes the
+                         # base off the wall -- is itself the seat detector.
+DOCK_SERVO_GAIN = 3.0    # rad/s per m of lateral error seen by dock_eye
+DOCK_SEAT_EXT = 0.065    # m: a stall deeper than this is seated, shallower is a jam
+DOCK_SEAT_EXT_MAX = 0.15  # m: a stall beyond this reached into AIR (a mis-aimed
+                          # arm found nothing to touch) -- a failure, not a seat.
+                          # The first false "PLUGGED IN" stalled at 198 mm, arm
+                          # fully extended over the top of the housing.
+# Hand-eye calibration (measured, perfectly-aligned robot vs servo output):
+#   range   lateral bias   vertical bias   -> the box clips on the frame
+#   0.50 m     +0.9 mm        +1.1 mm         bottom below ~0.32 m (camera
+#   0.32 m     +0.9 mm        +2.1 mm         rides 0.064 above the plug), so
+#   0.26 m     +1.0 mm        +9.1 mm         its center biases UP while the
+#   0.19 m     +0.4 mm       +22.8 mm         lateral center stays honest.
+# Each axis therefore freezes at its own range floor:
+DOCK_ZSERVO_FREEZE = 0.32   # vertical trim: frozen below this range
+DOCK_YSERVO_FREEZE = 0.17   # lateral steer: usable nearly to contact
+DOCK_STALL_TIME = 0.8    # s without arm progress = stalled (seated or jammed)
+DOCK_VERIFY_TIME = 1.5   # s of servoing with no detection = phantom target
+DOCK_MAX_ATTEMPTS = 2
 
 
 class Lifecycle:
@@ -101,6 +139,9 @@ class Lifecycle:
     self.grid = OccupancyGrid(x_min=-3, y_min=-3, x_max=7, y_max=7, resolution=0.05)
     self.landmarks = LandmarkStore()
     self.spotter = OutletSpotter(self.model, weights) if weights else None
+    # Second spotter on the carriage camera: the terminal visual servo's eye.
+    self.dock_spotter = (OutletSpotter(self.model, weights, camera_name="dock_eye")
+                         if weights else None)
 
     # -- model handles, looked up once
     m = self.model
@@ -119,6 +160,20 @@ class Lifecycle:
     self.standoff_dir: tuple[float, float] | None = None
     self.charge_strikes = 0
     self.final_heading_error: float | None = None
+
+    # -- DOCK state
+    self.dock_stage = "align"          # align -> servo -> insert (-> retract)
+    self.stage_t0 = 0.0
+    self.dock_attempts = 0
+    self.set_aside: set[int] = set()   # landmarks benched after jams (kept in map)
+    self.last_seen_socket = 0.0
+    self.next_dock_look = 0.0
+    self.dock_w = 0.0
+    self.dock_lift_trim = 0.0
+    self.dock_z_fixed = False
+    self.last_ext = 0.0
+    self.last_ext_t = 0.0
+    self.docked = False
 
     # -- shared navigation state
     self.waypoints: list[tuple[float, float]] = []
@@ -165,7 +220,7 @@ class Lifecycle:
       # this threshold. It never collided by luck, not by design.
       # Not re-armed mid-backoff, so a backoff is a bounded 0.8 s pulse
       # rather than an open-ended reverse into whatever is behind.
-      if d.time >= self.backoff_until:
+      if d.time >= self.backoff_until and self.state != "DOCK":
         front = ranges[np.abs(angles) < 0.35]
         if front.min() < FRONT_STOP_RANGE:
           self.backoff_until = d.time + BACKOFF_TIME
@@ -199,6 +254,8 @@ class Lifecycle:
     self.mode = "spin"
     self.spin_remaining = 2 * math.pi
 
+  PLUG_LATERAL = 0.05    # m: the plug rides this far right of the centerline
+
   def standoff_of(self, lm) -> tuple[float, float, float]:
     """A landmark's docking hand-off pose, using the map-derived wall normal.
 
@@ -207,10 +264,16 @@ class Lifecycle:
     it describes does not move.
     """
     if lm is self.target and self.standoff_dir is not None:
-      return lm.standoff(self.standoff_distance, direction=self.standoff_dir)
-    d = wall_normal(self.grid, lm.x, lm.y,
-                    fallback=(lm.seen_from_x - lm.x, lm.seen_from_y - lm.y))
-    return lm.standoff(self.standoff_distance, direction=d)
+      sx, sy, hd = lm.standoff(self.standoff_distance, direction=self.standoff_dir)
+    else:
+      d = wall_normal(self.grid, lm.x, lm.y,
+                      fallback=(lm.seen_from_x - lm.x, lm.seen_from_y - lm.y))
+      sx, sy, hd = lm.standoff(self.standoff_distance, direction=d)
+    # Shift the AXLE target left so the PLUG (not the robot centerline) lands
+    # on the socket axis: docking measured a structural 5 cm lateral miss
+    # without this, forcing the visual servo to burn its whole authority.
+    return sx - self.PLUG_LATERAL * math.sin(hd), \
+           sy + self.PLUG_LATERAL * math.cos(hd), hd
 
   def plan_to(self, wx: float, wy: float) -> bool:
     """A* from the robot's cell to a world point; fills self.waypoints.
@@ -224,6 +287,21 @@ class Lifecycle:
     rows, cols = trav.shape
     rix, riy = self.grid.world_to_cell(self.pose[0], self.pose[1])
     start = (min(max(rix, 0), cols - 1), min(max(riy, 0), rows - 1))
+    if not trav[start[1], start[0]]:
+      # The robot itself can stand inside the inflation ring -- guaranteed
+      # right after docking, when it is pressed against a wall. A* would fail
+      # from a non-traversable start, so plan from the nearest free cell and
+      # let drive_toward cover the first few centimeters.
+      best, best_d = None, 1e9
+      for dy in range(-10, 11):
+        for dx in range(-10, 11):
+          x2, y2 = start[0] + dx, start[1] + dy
+          if 0 <= x2 < cols and 0 <= y2 < rows and trav[y2, x2]:
+            if dx * dx + dy * dy < best_d:
+              best, best_d = (x2, y2), dx * dx + dy * dy
+      if best is None:
+        return False
+      start = best
     goal = self.grid.world_to_cell(wx, wy)
     if not (0 <= goal[0] < cols and 0 <= goal[1] < rows):
       return False
@@ -337,16 +415,221 @@ class Lifecycle:
     if abs(err) > FACING_TOLERANCE:
       return 0.0, max(-W_MAX, min(W_MAX, K_HEADING * err))
     self.final_heading_error = err
-    print(f"t={self.data.time:6.1f}s  FACE_OUTLET -> DONE  (believed heading "
+    print(f"t={self.data.time:6.1f}s  FACE_OUTLET -> DOCK  (believed heading "
           f"error {math.degrees(err):+.2f} deg)")
-    self.state = "DONE"
+    self.state = "DOCK"
+    self.dock_stage = "align"
+    self.dock_z_fixed = False
+    self.dock_lift_trim = 0.0
+    self.stage_t0 = self.data.time
+    # mm-scale plug/socket contacts need the finer step (spike lesson);
+    # switching mid-run is safe and keeps exploration at the cheap 2 ms.
+    self.model.opt.timestep = DOCK_TIMESTEP
+    self.model.actuator_forcerange[self.model.actuator("arm").id] =         [-DOCK_ARM_FORCE, DOCK_ARM_FORCE]
+    return 0.0, 0.0
+
+  def reject_target(self, why: str, forget: bool = False) -> tuple[float, float]:
+    """Give up on this landmark and pick another.
+
+    forget=True erases it -- for phantoms only (the last defense against a
+    systematic detector false positive, see SimNotes). A genuine outlet that
+    merely JAMMED is kept in the map but benched for this mission: watched
+    failure mode was the robot jamming twice at a TRUE outlet, deleting it,
+    and permanently forgetting a real charging spot."""
+    print(f"t={self.data.time:6.1f}s  DOCK rejects target at "
+          f"({self.target.x:+.2f}, {self.target.y:+.2f}): {why}")
+    if forget and self.target in self.landmarks.landmarks:
+      self.landmarks.landmarks.remove(self.target)
+    self.set_aside.add(id(self.target))
+    self.data.ctrl[self.model.actuator("arm").id] = 0.0
+    self.data.ctrl[self.model.actuator("lift").id] = 0.0
+    self.standoff_distance = STANDOFF_DISTANCE
+    self.dock_attempts = 0
+    candidates = [lm for lm in self.landmarks.confirmed()
+                  if id(lm) not in self.set_aside]
+    self.target = min(candidates, key=lambda lm: math.hypot(
+      lm.x - self.pose[0], lm.y - self.pose[1])) if candidates else None
+    self.state = "GO_CHARGE" if self.target is not None else "DONE"
+    if self.target is not None:
+      self.standoff_dir = wall_normal(
+        self.grid, self.target.x, self.target.y,
+        fallback=(self.target.seen_from_x - self.target.x,
+                  self.target.seen_from_y - self.target.y))
+    return 0.0, 0.0
+
+  def charging_contact(self) -> bool:
+    """The sim analog of the charging circuit's voltage detector: a PIN
+    touching socket-floor geometry at least 19 mm into the recess -- i.e.,
+    inside a pin channel, where a real Schuko's contacts live. Depth matters:
+    a mis-aligned pin bottoming on the floor's FRONT face (17 mm) touches the
+    same geoms, and an earlier name-only version accepted exactly that jam as
+    "plugged in" with the plug 9 mm below the holes."""
+    d, m = self.data, self.model
+    pins = {m.geom("plug_pin_l").id, m.geom("plug_pin_r").id}
+    for i in range(d.ncon):
+      c = d.contact[i]
+      pin = pins & {c.geom1, c.geom2}
+      if not pin:
+        continue
+      other = ({c.geom1, c.geom2} - pin).pop()
+      if "_floor_" not in (m.geom(other).name or ""):
+        continue
+      bid = m.geom(other).bodyid[0] if hasattr(m.geom(other).bodyid, "__len__")             else m.geom(other).bodyid
+      sp, mat = d.xpos[bid], d.xmat[bid]
+      nx, ny = float(mat[0]), float(mat[3])   # socket +x = outward normal
+      depth = -((c.pos[0] - sp[0]) * nx + (c.pos[1] - sp[1]) * ny)
+      if depth >= 0.019:
+        return True
+    return False
+
+  def feelers_touching(self) -> int:
+    prongs = {self.model.geom("prong_l").id, self.model.geom("prong_r").id}
+    d = self.data
+    return len({g for i in range(d.ncon)
+                for g in (d.contact[i].geom1, d.contact[i].geom2) if g in prongs})
+
+  def dock(self) -> tuple[float, float]:
+    """Terminal docking: align lift -> visually servo in -> insert.
+
+    Wheels do the pushing (velocity ctrl, force-limited by kv), the arm does
+    the last centimeters under a 2.5 N cap (the measured push budget), and
+    the feelers square the yaw mechanically when both touch the wall. All
+    numbers here were measured by probes before this controller existed.
+    """
+    d, m = self.data, self.model
+    lift, arm = m.actuator("lift").id, m.actuator("arm").id
+
+    if self.dock_stage == "align":
+      d.ctrl[lift] = (self.target.z - 0.145) + DOCK_DROOP_COMP
+      if d.time - self.stage_t0 > 1.5:
+        self.dock_stage = "servo"
+        self.stage_t0 = d.time
+        self.last_seen_socket = d.time
+        self.dock_w = 0.0
+      return 0.0, 0.0
+
+    if self.dock_stage == "servo":
+      # Creep in while steering the plug line onto the socket with dock_eye.
+      # The camera sits ON the plug axis (same y), so a detection's lateral
+      # offset IS the plug's miss distance: e = u_c * range / f. The detector
+      # runs at ~4 Hz (a YOLO call costs ~10 physics steps of wall time at
+      # the 1 ms docking timestep); the steering command holds in between.
+      w = self.dock_w
+      if self.dock_spotter is not None and d.time >= self.next_dock_look:
+        self.next_dock_look = d.time + 0.25
+        r = self.dock_spotter.renderer
+        r.update_scene(d, camera="dock_eye")
+        rgb = r.render()
+        r.enable_depth_rendering()
+        r.update_scene(d, camera="dock_eye")
+        depth = r.render()
+        r.disable_depth_rendering()
+        res = self.dock_spotter.detector.predict(
+          np.ascontiguousarray(rgb[:, :, ::-1]), conf=0.5, verbose=False)[0]
+        if len(res.boxes):
+          self.last_seen_socket = d.time
+          u, v = float(res.boxes.xywh[0][0]), float(res.boxes.xywh[0][1])
+          iu, iv = min(int(u), 639), min(int(v), 359)
+          rng = float(np.median(depth[max(0, iv-1):iv+2, max(0, iu-1):iu+2]))
+          f = 180 / math.tan(math.radians(41.0) / 2)
+          # Two-axis servo, each axis trusted only in its calibrated range
+          # (see the table above). Lateral: the camera shares the plug's
+          # y-axis, so the horizontal image offset IS the plug's miss ->
+          # steer the base. Vertical: the camera rides 0.064 m above the
+          # plug axis (mount + measured RCC droop), so the socket should
+          # image that far below center; the residual is a plug height
+          # error the wheels cannot fix -> trim the lift.
+          if rng >= DOCK_YSERVO_FREEZE:
+            e = (u - 320 + 0.5) * rng / f
+            w = max(-0.4, min(0.4, -DOCK_SERVO_GAIN * e))
+            self.dock_w = w
+          if rng >= DOCK_ZSERVO_FREEZE:
+            err_z = -(v - 180 + 0.5) * rng / f + 0.064
+            self.dock_lift_trim = max(-0.01, min(0.01,
+              self.dock_lift_trim + 0.4 * err_z))
+            d.ctrl[lift] = (self.target.z - 0.145) + DOCK_DROOP_COMP + self.dock_lift_trim
+        elif (d.time - self.stage_t0 < 5.0
+              and d.time - self.last_seen_socket > DOCK_VERIFY_TIME):
+          # Absent detection early in the approach = phantom target; absent
+          # close to the wall = normal occlusion, keep going on frozen cmds.
+          return self.reject_target("no outlet visible up close (phantom?)", forget=True)
+      touching = self.feelers_touching()
+      if touching == 2:
+        self.dock_stage = "insert"
+        self.stage_t0 = d.time
+        self.last_ext = 0.0
+        self.last_ext_t = d.time
+        # Press-sag feed-forward: pressing the feelers pitches the robot and
+        # the plug sags MORE the higher the lift (moment arm). Calibrated:
+        # -2.5 mm at z=0.26, -16.7 mm at z=0.38 -> ~118 mm per meter of lift.
+        press_sag = 0.0025 + 0.118 * max(0.0, self.target.z - 0.26)
+        d.ctrl[lift] = ((self.target.z - 0.145) + DOCK_DROOP_COMP
+                        + self.dock_lift_trim + press_sag)
+        d.ctrl[arm] = 0.20
+        # World-frame reference for plug advance: odometry projection along
+        # the heading plus arm extension. Advance is what discriminates a
+        # true seat from a jam -- both push the base off the wall.
+        h = self.pose[2]
+        self.insert_ref = (self.pose[0] * math.cos(h) + self.pose[1] * math.sin(h))
+        return 0.0, 0.0
+      if touching == 1 and d.time - self.stage_t0 > 4.0:
+        # one feeler down for a while: pivot gently to land the other
+        w = 0.25 if d.time % 2.0 < 1.0 else -0.25
+      if d.time - self.stage_t0 > 30.0:
+        return self.reject_target("could not square up on the wall")
+      # Approach at 0.06 m/s across the open ~0.5 m of standoff, dropping to
+      # feeler-creep speed once anything touches (probe-tuned: first contact
+      # at 60 mm/s just compresses solref and settles; no bounce).
+      v = DOCK_CREEP * 0.045 if touching else 0.06
+      return v, w
+
+    if self.dock_stage == "insert":
+      ext = d.qpos[m.joint("arm_joint").qposadr[0]]
+      # Seat verdict = the charging circuit reports contact (see
+      # charging_contact). Every clever inference tried before this --
+      # extension windows, base-release, odometry advance -- was defeated by
+      # some jam mode or frame bug; the electrical criterion is the one the
+      # physical robot will use anyway.
+      if self.charging_contact():
+        self.docked = True
+        d.ctrl[arm] = ext                # stop pushing; hold the plug home
+        print(f"t={d.time:6.1f}s  DOCK -> DONE  PLUGGED IN "
+              f"(charge contact, ext {ext * 1000:.1f} mm)")
+        self.state = "DONE"
+        return 0.0, 0.0
+      if ext > self.last_ext + 0.0005:
+        self.last_ext = ext
+        self.last_ext_t = d.time
+      stalled = d.time - self.last_ext_t > DOCK_STALL_TIME
+      released = (self.feelers_touching() == 0 and d.time - self.stage_t0 > 1.0)
+      if stalled or released or ext > DOCK_SEAT_EXT_MAX:
+        # no charge and no progress: jammed (or reached into air) -- retry
+        self.dock_attempts += 1
+        d.ctrl[arm] = 0.0
+        self.dock_lift_trim = 0.0      # a bad trim may be WHY it missed
+        d.ctrl[lift] = (self.target.z - 0.145) + DOCK_DROOP_COMP
+        if self.dock_attempts >= DOCK_MAX_ATTEMPTS:
+          return self.reject_target(f"no charge contact after "
+                                    f"{DOCK_MAX_ATTEMPTS} attempts")
+        print(f"t={d.time:6.1f}s  DOCK no contact (ext {ext * 1000:.0f} mm) -- retrying")
+        self.dock_stage = "retract"
+        self.stage_t0 = d.time
+        return 0.0, 0.0
+      return DOCK_PRESS * 0.045, 0.0   # gentle press while the arm works
+
+    # retract: pull the arm in, back away, then servo back in
+    if d.time - self.stage_t0 < 2.0:
+      return -0.06, 0.0
+    self.dock_stage = "servo"
+    self.stage_t0 = d.time
+    self.last_seen_socket = d.time
     return 0.0, 0.0
 
   # ---- the loop ------------------------------------------------------------
 
   def run(self) -> None:
     phases = {"EXPLORE": self.explore, "GO_CHARGE": self.go_charge,
-              "FACE_OUTLET": self.face_outlet}
+              "FACE_OUTLET": self.face_outlet, "DOCK": self.dock}
     viewer = None if self.headless else mujoco.viewer.launch_passive(self.model, self.data)
     try:
       while ((viewer is None or viewer.is_running())
@@ -410,6 +693,19 @@ class Lifecycle:
     """
     if self.target is None:
       return
+    if self.docked:
+      face = self.data.site_xpos[self.model.site("plug_face").id]
+      best = min(("socket_a", "socket_b", "socket_c"), key=lambda n: sum(
+        (self.model.body(n).pos[k] - face[k]) ** 2 for k in range(3)))
+      bid = self.model.body(best).id
+      sp = self.data.xpos[bid]
+      mat = self.data.xmat[bid]
+      nx, ny = float(mat[0]), float(mat[3])       # socket +x = outward normal
+      depth = -((face[0] - sp[0]) * nx + (face[1] - sp[1]) * ny)
+      lat = abs(-(face[0] - sp[0]) * ny + (face[1] - sp[1]) * nx)
+      print(f"\nDOCK truth vs {best}: face {depth * 1000:+.1f} mm into the recess "
+            f"(floor at +17), lateral {lat * 1000:.1f} mm, height err "
+            f"{(face[2] - sp[2]) * 1000:+.1f} mm")
     names = ("outlet_a", "outlet_b", "outlet_c")
     name = min(names, key=lambda n: math.hypot(
       self.model.body(n).pos[0] - self.target.x,

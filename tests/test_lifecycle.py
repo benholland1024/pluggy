@@ -126,10 +126,66 @@ def test_face_outlet_turns_then_stops(sim, lifecycle_module):
   assert sim.state == "FACE_OUTLET"           # still turning, not handed off
   assert v == 0.0 and abs(w) > 0.0
 
-  # Outlet dead ahead of the robot's current heading: already squared up.
+  # Outlet dead ahead of the robot's current heading: already squared up --
+  # and the mission continues into DOCK, no longer ending at the pose.
   sim.target = sim.landmarks.add_sighting(-1.0, 0.0, 0.24, seen_from=(0.0, 0.0))
   sim.standoff_dir = (-1.0, 0.0)
   v, w = sim.face_outlet()
-  assert sim.state == "DONE"
+  assert sim.state == "DOCK"
+  assert sim.dock_stage == "align"
   assert (v, w) == (0.0, 0.0)
   assert abs(sim.final_heading_error) <= lifecycle_module.FACING_TOLERANCE
+
+
+def test_mechanical_dock_from_perfect_standoff(lifecycle_module):
+  """The full mechanical docking stack -- creep, feeler squaring, press-sag
+  compensation, RCC funnel capture, charge-contact detection -- must seat the
+  plug from a perfect standoff with no vision in the loop (weights=None means
+  the servo runs a straight creep). This is the deterministic floor under the
+  visual controller: if THIS fails, the machine broke, not the model."""
+  lc = lifecycle_module
+  sim = lc.Lifecycle(headless=True, max_sim_time=9999, weights=None,
+                     explore_budget=9999)
+  ox, oy, oz, yaw = -1.953, 1.0, 0.26, math.pi
+  sx = ox + 0.6 - 0.05 * math.sin(yaw)
+  sy = oy + 0.05 * math.cos(yaw)
+  sim.data.qpos[0:3] = [sx + 0.08 * math.cos(yaw), sy + 0.08 * math.sin(yaw), 0.045]
+  sim.data.qpos[3:7] = [math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]
+  mujoco.mj_forward(sim.model, sim.data)
+  sim.reckoner.x, sim.reckoner.y, sim.reckoner.theta = sx, sy, yaw
+  sim.target = sim.landmarks.add_sighting(ox, oy, oz, seen_from=(sx, sy))
+  sim.state = "DOCK"
+  sim.dock_stage = "align"
+  sim.stage_t0 = 0.0
+  sim.model.opt.timestep = lc.DOCK_TIMESTEP
+  sim.model.actuator_forcerange[sim.model.actuator("arm").id] = \
+      [-lc.DOCK_ARM_FORCE, lc.DOCK_ARM_FORCE]
+  t0 = sim.data.time
+  while sim.data.time - t0 < 60 and sim.state == "DOCK":
+    sim.perceive()
+    v, w = sim.dock()
+    sim.actuate(v, w)
+    mujoco.mj_step(sim.model, sim.data)
+    sim.step_count += 1
+  assert sim.docked, f"mechanical dock failed (stage {sim.dock_stage})"
+  # and the charge criterion is telling the truth: face near the well floor
+  face = sim.data.site_xpos[sim.model.site("plug_face").id]
+  assert abs(face[1] - oy) < 0.004, "seated plug should be laterally centred"
+  assert abs(face[2] - oz) < 0.006, "seated plug should be at socket height"
+
+
+def test_jam_benches_but_phantom_forgets(sim):
+  """A jam at a real outlet must NOT erase it from the map (watched failure:
+  two jams deleted a true charging spot forever); only a phantom -- a target
+  that fails close-range verification -- is forgotten."""
+  for _ in range(3):
+    real = sim.landmarks.add_sighting(-1.95, 1.0, 0.26, seen_from=(-1.2, 1.0))
+  sim.target = real
+  sim.reject_target("jammed", forget=False)
+  assert real in sim.landmarks.landmarks, "jam erased a real outlet"
+  assert id(real) in sim.set_aside, "jammed outlet should be benched"
+  for _ in range(3):
+    ghost = sim.landmarks.add_sighting(4.5, -1.95, 0.28, seen_from=(4.5, -1.2))
+  sim.target = ghost
+  sim.reject_target("phantom", forget=True)
+  assert ghost not in sim.landmarks.landmarks, "phantom survived"

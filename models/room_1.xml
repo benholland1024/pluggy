@@ -92,13 +92,18 @@
       <geom type="box" size="0.25 0.25 0.15" rgba="0.5 0.9 0.5 1"/>
     </body>
 
+    <!-- Dockable sockets: invisible collision geometry aligned with the
+         visual outlets below (generated file — see header). -->
+    <include file="schuko_sockets.xml"/>
+
     <!--  Outlets (Schuko, from primitives — same construction as
           perception/outlet_scene.py outlet_xml(), but DELIBERATELY not
           identical to the training distribution: plate colors and sizes vary,
           testing that the detector generalizes rather than memorizes.
           Geom names keep the outlet_ prefix so ground-truth eval can find
-          them. Visual-only (contype 0): the docking target gets collision
-          geometry later, when milestone 6 needs it.
+          them. Visual layer only (contype 0) — the matching COLLISION layer
+          is the invisible surface-mount sockets in schuko_sockets.xml, and
+          the housing box is the visible body of that surface mount.
 
           Placement: body sits wall_face + 0.004 out (plate back flush with
           the wall). euler: 0 faces +x, 90 faces +y (matches outlet_scene's
@@ -118,7 +123,9 @@
     -->
 
     <!-- Outlet A: west wall, room 1. Bright white, slightly oversized plate. -->
-    <body name="outlet_a" pos="-1.986 1.0 0.26" euler="0 0 0">
+    <body name="outlet_a" pos="-1.953 1.0 0.26" euler="0 0 0">
+      <geom name="outlet_a_housing" type="box" size="0.0165 0.048 0.048"
+            pos="-0.0205 0 0" rgba="0.91 0.90 0.87 1" contype="0" conaffinity="0"/>
       <geom name="outlet_a_plate" type="box" size="0.004 0.042 0.042"
             rgba="0.97 0.96 0.94 1" contype="0" conaffinity="0"/>
       <geom name="outlet_a_well" type="cylinder" size="0.028 0.0015" zaxis="1 0 0"
@@ -136,7 +143,9 @@
     </body>
 
     <!-- Outlet B: south wall, room 1. Warm cream, slightly undersized plate. -->
-    <body name="outlet_b" pos="0.5 -1.986 0.30" euler="0 0 90">
+    <body name="outlet_b" pos="0.5 -1.953 0.30" euler="0 0 90">
+      <geom name="outlet_b_housing" type="box" size="0.0165 0.048 0.048"
+            pos="-0.0205 0 0" rgba="0.91 0.90 0.87 1" contype="0" conaffinity="0"/>
       <geom name="outlet_b_plate" type="box" size="0.004 0.038 0.038"
             rgba="0.89 0.86 0.79 1" contype="0" conaffinity="0"/>
       <geom name="outlet_b_well" type="cylinder" size="0.028 0.0015" zaxis="1 0 0"
@@ -154,7 +163,9 @@
     </body>
 
     <!-- Outlet C: east wall, room 2. Cool light gray, standard plate. -->
-    <body name="outlet_c" pos="5.986 4.5 0.38" euler="0 0 180">
+    <body name="outlet_c" pos="5.953 4.5 0.38" euler="0 0 180">
+      <geom name="outlet_c_housing" type="box" size="0.0165 0.048 0.048"
+            pos="-0.0205 0 0" rgba="0.91 0.90 0.87 1" contype="0" conaffinity="0"/>
       <geom name="outlet_c_plate" type="box" size="0.004 0.04 0.04"
             rgba="0.84 0.85 0.86 1" contype="0" conaffinity="0"/>
       <geom name="outlet_c_well" type="cylinder" size="0.028 0.0015" zaxis="1 0 0"

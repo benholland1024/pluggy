@@ -11,8 +11,14 @@ def pitch_deg(data):
   w, x, y, z = data.qpos[3:7]
   return math.degrees(math.asin(max(-1.0, min(1.0, 2 * (w * y - z * x)))))
 
+def wheel_ids(model):
+  """ctrl[:] stopped being safe when the arm arrived: blanket writes would
+  also command the lift/arm position servos. Address wheels by name."""
+  return model.actuator("left_motor").id, model.actuator("right_motor").id
+
+
 def test_model_compiles(world_model):
-  assert world_model.nu == 2 # exactly 2 motors
+  assert world_model.nu == 4  # 2 wheel motors + lift + arm (milestone 6)
 
 def test_rests_level(world_model, world_data):
   settle(world_model, world_data)
@@ -20,7 +26,8 @@ def test_rests_level(world_model, world_data):
 
 def test_drives_straight(world_model, world_data):
   settle(world_model, world_data)
-  world_data.ctrl[:] = 21.0
+  left, right = wheel_ids(world_model)
+  world_data.ctrl[left] = world_data.ctrl[right] = 21.0
   settle(world_model, world_data, seconds=5.0)
   assert world_data.qpos[0] > 2.0           # actually went somewhere
   assert abs(world_data.qpos[1]) < 0.05     # without veering
@@ -28,7 +35,8 @@ def test_drives_straight(world_model, world_data):
 
 def test_turns_in_place(world_model, world_data):
   settle(world_model, world_data)
-  world_data.ctrl[:] = [-10.0, 10.0]
+  left, right = wheel_ids(world_model)
+  world_data.ctrl[left], world_data.ctrl[right] = -10.0, 10.0
   settle(world_model, world_data, seconds=3.0)
   assert math.hypot(world_data.qpos[0], world_data.qpos[1]) < 0.1  # stayed put while spinning
    

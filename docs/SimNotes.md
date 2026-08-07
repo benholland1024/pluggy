@@ -212,6 +212,99 @@ tests/test_schuko.py):
   (a guess at arm+base flex — revisit with the real arm), gravity off (the lift owns
   height), and tolerances scale with that compliance.
 
+## Arm modelling lessons (milestone 6)
+
+### A wall cannot brace you — one-way contacts don't pull
+The Parts.md wall-brace idea (pads take the insertion couple so the base doesn't tip)
+was **measured false**: a wall contact only pushes the robot *away*, the same direction
+as the insertion reaction, so pads add to the overturning moment. With-brace performed
+worse than without. The prongs survive as *alignment feelers* (two tips touching = yaw
+mechanically squared across a 0.14 m base + depth reference), not as a brace. Measured
+push capacity at outlet height (2.34 kg robot, ramped load): **forward docking holds
+~3 N then slides; backward holds ~4 N then goes caster-light**. Against spike insertion
+forces (0.7 N aligned / 6.1 N at 2 mm / 7.8 N at 2° yaw) the budget means: insertion
+must stay ≲3 N → terminal alignment ≲1 mm, softer RCC, or active-drive strategies —
+the docking controller's problem, now with numbers.
+
+### MuJoCo silently ignores adjacent-link interpenetration
+A body with no joint is *welded* into its parent, and contact filtering treats the weld
+group as one body — so the carriage (child of the chassis weld group) can sweep its
+prongs straight **through** the head mount and the contact pipeline reports nothing
+(verified: overlapping AABBs, zero contacts). On hardware that's a collision; in sim
+it's silence. Consequence: clearance between adjacent links must be asserted from
+*geometry* — tests/test_arm.py sweeps the full envelope checking AABB disjointness, and
+the check caught two further 5 mm interpenetrations (tube↔motor, carriage↔chassis) that
+contacts never would. Endpoint checks are not envelope checks; contact checks are not
+clearance checks.
+
+### Asymmetric mass makes a diff-drive veer open-loop
+The arm assembly (~0.8 kg at y=−0.05) made the robot veer **26 cm right over 4 m** of
+straight driving — wheel velocity servos track equal speeds, but unequal wheel loads
+slip unequally. Fixed by counterweight: the battery sits at y=+0.06, tuned to null the
+*measured veer* (+4 mm over 4.2 m), which leaves ~7 mm of static CoM offset because
+load-dependent slip is not linear in CoM. Position the battery in the model as a
+counterweight first, packaging second.
+
+### Inflation must track the outermost geometry, not the chassis
+The feeler tips sweep 0.27 m from the axle — outside the 0.25 m obstacle inflation
+calibrated for the bare chassis (0.15 m half-diagonal). First long explore run with the
+arm: a prong clipped an obstacle mid-corner. `traversable_mask` default is now 7 cells
+(0.35 m). Anything that grows the robot must grow the inflation.
+
+### A repeated false positive becomes a confirmed phantom — demonstrated
+On the first long armed run, the detector fired 6× on `decoy_blank_s` (a blank plate),
+the landmark confirmed, GO_CHARGE selected it as nearest, and the robot parked squarely
+in front of a blank plate. The dock report's ground-truth check exposed it (−364 cm
+"lateral offset" vs the nearest real outlet). The threshold/eval work reduced random
+false positives, but a *systematic* one at a fixed spot defeats sighting counts by
+simply recurring. Defense: the DOCK state must re-verify the target with a close-range
+look (dock_eye) before committing — planned for the docking controller.
+
+## Docking controller lessons (milestone 6)
+
+### Walls have no holes, so wall sockets must be surface-mounted
+The spike's socket floated in space; placed in room_1, its 37 mm recess passed through
+the wall slab, and the first docking probe measured the pins bottoming on the *wall*
+one pin-length short. MuJoCo cannot cut a hole in a box, so the sockets are modelled
+as German **Aufputz** (surface-mount) fixtures — recess fully proud of the wall, with
+a visible housing box behind the visual plate. Real hardware, not a workaround.
+Collision layer: invisible (alpha 0) generated bodies in `models/schuko_sockets.xml`
+(regenerate: `uv run python -m pluggybot.docking.schuko`), aligned with the visual
+outlets; unrendered geoms also stay out of segmentation, so detector GT is untouched.
+
+### Gravity was off in the spike, and gravity is a docking axis
+The plug axis sags **7.8 mm** under gravity (lift servo droop + RCC springs) — the
+spike never saw it. Pressing the feelers adds a pitch sag that GROWS with lift height
+(wheel-torque reaction, softer at high CoM). Both are feed-forward calibration
+constants now (`DOCK_DROOP_COMP`, press-sag ~118 mm per m of lift), exactly the shape
+of calibration a real robot needs.
+
+### A camera above the plug loses the target exactly when it matters
+The dock camera rides 0.06 m above the plug axis; below ~0.32 m range the socket
+slides out of the frame bottom, the detector boxes the surviving sliver, and its
+centre biases up — hand-eye calibration measured +2 mm of vertical bias at 0.32 m,
++23 mm at 0.19 m, while the LATERAL centre stayed honest to 0.19 m (+1 mm). Hence the
+split-axis servo: lateral steers nearly to contact, vertical freezes at 0.32 m.
+Measure each axis of a visual servo separately; they do not fail together.
+
+### The seat detector was harder than the seating
+Four verdict schemes failed in sequence, each defeated by a real event: extension
+windows (base slides back, extension lies), base-release (a jammed plug also shoves
+the base off), odometry advance (frame bug on one wall heading), floor-contact by
+name (a pin bottoming on the floor's FRONT face reads the same as a pin in a hole).
+What survived: **the electrical criterion** — pin contact ≥19 mm into the recess,
+i.e. inside a pin channel, which is unreachable except through a hole. It is also
+literally the sensor the physical robot will have (charging voltage), and the
+milestone-7 battery hook.
+
+### Scripted-baseline verdict: mechanics solved, vision-z is the gap
+From a perfect standoff the mechanical stack docks deterministically (pytest:
+`test_mechanical_dock_from_perfect_standoff`) — feelers square the yaw, the RCC +
+funnel absorb ±4 mm, the charge criterion confirms sub-mm seats. End-to-end with the
+visual servo under 2 cm standoff jitter: **4/12 (33 %)**, failures dominated by
+plug-height error the box-centre servo cannot measure well. That is precisely the
+gap the keypoint/PnP pose model (or RL) was predicted to fill — next.
+
 ## Debugging workflow that worked
 
 1. Reproduce headlessly with printed telemetry (pose, wheel ω, contact list, `ncon`) — vibes don't bisect.

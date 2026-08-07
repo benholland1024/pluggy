@@ -32,8 +32,12 @@ Simulated self-charging robot in MuJoCo. Before doing anything, read:
 - Demos: `scripts/teleop.py`, `scripts/map_teleop.py`, `scripts/explore.py [--headless]`
   (milestone-4 mapping demo — kept as the minimal repro; `lifecycle.py` is the
   full mission), `scripts/spot_outlets.py` (detector → landmarks),
-  `scripts/lifecycle.py [--headless] [--explore-budget N]` (explore → charge),
+  `scripts/lifecycle.py [--headless] [--explore-budget N]` (full mission:
+  explore → charge → dock; DOCK is real physics — plug seats in the socket),
   `scripts/schuko_spike.py` (docking tolerance sweep)
+- Sockets: `models/schuko_sockets.xml` is GENERATED (invisible collision
+  layer for room_1's outlets) — regenerate with
+  `uv run python -m pluggybot.docking.schuko` after moving an outlet
 - Dataset (deterministic; `datasets/` is gitignored, and the generator wipes it
   first — regenerating into a dirty dir once contaminated 195 labels):
   `MUJOCO_GL=egl uv run python scripts/generate_outlet_dataset.py --count 1200`

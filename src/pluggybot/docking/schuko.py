@@ -76,6 +76,81 @@ def _ring_boxes(name, x_center, x_half, r_mid, tang_half, rad_half, rgba,
   return "\n      ".join(out)
 
 
+def socket_geoms_xml(prefix: str = "", chamfer_len: float = CHAMFER_LEN,
+                     rgba: str | None = None, solref: str | None = None) -> str:
+  """All geoms of one Schuko socket, recess along -x, mouth facing +x.
+
+  prefix namespaces the geom names so several sockets can coexist. rgba
+  overrides every geom's color — pass an alpha of 0 for an invisible
+  collision layer behind a pretty visual outlet (unrendered geoms also stay
+  out of segmentation, so detector ground truth is unaffected). solref, when
+  given, is stamped on every geom: room worlds run at timestep 0.002 with no
+  spike-style global default, and mm-scale contacts need the stiffer 0.005.
+  """
+  extra = (f' solref="{solref}"' if solref else "")
+
+  def paint(default):
+    # NOTE: returns an UNTERMINATED attribute tail — the caller's template
+    # closes the quote. Lets one helper stamp rgba+solref+friction together.
+    return (rgba or default) + '"' + extra + ' friction="0.3'
+
+  r_mouth = R_WELL + chamfer_len       # capture radius at the mouth
+  seg_tang = (R_WELL + 0.004) * math.tan(math.pi / N_SEG) * 1.2  # overlap
+  wall = _ring_boxes(prefix + "wall", -WELL_DEPTH / 2, WELL_DEPTH / 2,
+                     R_WELL + 0.002, seg_tang, 0.002, paint("0.8 0.8 0.85 0.4"))
+  funnel_half = chamfer_len / math.cos(math.pi / 4) / 2
+  funnel = _ring_boxes(prefix + "funnel", chamfer_len / 2, funnel_half,
+                       (R_WELL + r_mouth) / 2 + 0.002,
+                       r_mouth * math.tan(math.pi / N_SEG) * 1.2, 0.002,
+                       paint("0.8 0.8 0.85 0.4"), tilt_deg=45.0)
+
+  # Floor: 5 slabs leaving two 5.6 mm square channels at (y=+/-PIN_SEP, z=0).
+  fx, fh = -WELL_DEPTH - 0.010, 0.010          # slab center x, half-thickness
+  y_in, y_out = PIN_SEP - HOLE_HALF, PIN_SEP + HOLE_HALF
+  mid_z = HOLE_HALF                            # channel row half-height
+  floor = f"""
+      <geom name="{prefix}floor_top" type="box" size="{fh} 0.03 {(0.03 - mid_z) / 2:.5f}"
+            pos="{fx:.5f} 0 {(0.03 + mid_z) / 2:.5f}" rgba="{paint('0.9 0.88 0.85 1')}"/>
+      <geom name="{prefix}floor_bot" type="box" size="{fh} 0.03 {(0.03 - mid_z) / 2:.5f}"
+            pos="{fx:.5f} 0 {-(0.03 + mid_z) / 2:.5f}" rgba="{paint('0.9 0.88 0.85 1')}"/>
+      <geom name="{prefix}floor_mid" type="box" size="{fh} {y_in:.5f} {mid_z:.5f}"
+            pos="{fx:.5f} 0 0" rgba="{paint('0.9 0.88 0.85 1')}"/>
+      <geom name="{prefix}floor_l" type="box" size="{fh} {(0.03 - y_out) / 2:.5f} {mid_z:.5f}"
+            pos="{fx:.5f} {(0.03 + y_out) / 2:.5f} 0" rgba="{paint('0.9 0.88 0.85 1')}"/>
+      <geom name="{prefix}floor_r" type="box" size="{fh} {(0.03 - y_out) / 2:.5f} {mid_z:.5f}"
+            pos="{fx:.5f} {-(0.03 + y_out) / 2:.5f} 0" rgba="{paint('0.9 0.88 0.85 1')}"/>"""
+
+  # Face plate: 4 boxes framing the mouth so a wide miss hits a wall.
+  a = r_mouth + 0.001
+  px = chamfer_len + 0.001
+  plate = f"""
+      <geom name="{prefix}plate_t" type="box" size="0.001 0.055 {(0.055 - a) / 2:.5f}"
+            pos="{px:.5f} 0 {(0.055 + a) / 2:.5f}" rgba="{paint('0.9 0.88 0.85 1')}"/>
+      <geom name="{prefix}plate_b" type="box" size="0.001 0.055 {(0.055 - a) / 2:.5f}"
+            pos="{px:.5f} 0 {-(0.055 + a) / 2:.5f}" rgba="{paint('0.9 0.88 0.85 1')}"/>
+      <geom name="{prefix}plate_l" type="box" size="0.001 {(0.055 - a) / 2:.5f} {a:.5f}"
+            pos="{px:.5f} {(0.055 + a) / 2:.5f} 0" rgba="{paint('0.9 0.88 0.85 1')}"/>
+      <geom name="{prefix}plate_r" type="box" size="0.001 {(0.055 - a) / 2:.5f} {a:.5f}"
+            pos="{px:.5f} {-(0.055 + a) / 2:.5f} 0" rgba="{paint('0.9 0.88 0.85 1')}"/>"""
+  return wall + "\n      " + funnel + floor + plate
+
+
+def socket_body_xml(name: str, pos: tuple[float, float, float],
+                    facing_deg: float) -> str:
+  """One dockable socket as an invisible collision body, for room worlds.
+
+  Place it at the SAME pos/euler as the visual outlet body (outlet_scene's
+  convention: facing 0 faces +x, 90 faces +y): the collision mouth then sits
+  ~1 mm behind the painted plate face. The recess extends ~37 mm behind the
+  mouth — through the 20 mm room wall, poking out the far side, which is
+  cosmetic (outside the room, and invisible anyway).
+  """
+  return f"""
+  <body name="{name}" pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}" euler="0 0 {facing_deg:.1f}">
+      {socket_geoms_xml(prefix=name + "_", rgba="0.5 0.5 0.5 0", solref="0.005 1")}
+  </body>"""
+
+
 def scene_xml(y_off: float = 0.0, z_off: float = 0.0, yaw_deg: float = 0.0,
               chamfer_len: float = CHAMFER_LEN) -> str:
   """Socket at the origin facing +x; plug carrier approaching from +x.
@@ -84,44 +159,7 @@ def scene_xml(y_off: float = 0.0, z_off: float = 0.0, yaw_deg: float = 0.0,
   misalignment of the approach direction (rotation about z). chamfer_len:
   axial length of the 45-degree entry bevel (see CHAMFER_LEN).
   """
-  r_mouth = R_WELL + chamfer_len       # capture radius at the mouth
-  seg_tang = (R_WELL + 0.004) * math.tan(math.pi / N_SEG) * 1.2  # overlap
-  wall = _ring_boxes("wall", -WELL_DEPTH / 2, WELL_DEPTH / 2,
-                     R_WELL + 0.002, seg_tang, 0.002, "0.8 0.8 0.85 0.4")
-  funnel_half = chamfer_len / math.cos(math.pi / 4) / 2
-  funnel = _ring_boxes("funnel", chamfer_len / 2, funnel_half,
-                       (R_WELL + r_mouth) / 2 + 0.002,
-                       r_mouth * math.tan(math.pi / N_SEG) * 1.2, 0.002,
-                       "0.8 0.8 0.85 0.4", tilt_deg=45.0)
-
-  # Floor: 5 slabs leaving two 5.6 mm square channels at (y=+/-PIN_SEP, z=0).
-  fx, fh = -WELL_DEPTH - 0.010, 0.010          # slab center x, half-thickness
-  y_in, y_out = PIN_SEP - HOLE_HALF, PIN_SEP + HOLE_HALF
-  mid_z = HOLE_HALF                            # channel row half-height
-  floor = f"""
-      <geom name="floor_top" type="box" size="{fh} 0.03 {(0.03 - mid_z) / 2:.5f}"
-            pos="{fx:.5f} 0 {(0.03 + mid_z) / 2:.5f}" rgba="0.9 0.88 0.85 1"/>
-      <geom name="floor_bot" type="box" size="{fh} 0.03 {(0.03 - mid_z) / 2:.5f}"
-            pos="{fx:.5f} 0 {-(0.03 + mid_z) / 2:.5f}" rgba="0.9 0.88 0.85 1"/>
-      <geom name="floor_mid" type="box" size="{fh} {y_in:.5f} {mid_z:.5f}"
-            pos="{fx:.5f} 0 0" rgba="0.9 0.88 0.85 1"/>
-      <geom name="floor_l" type="box" size="{fh} {(0.03 - y_out) / 2:.5f} {mid_z:.5f}"
-            pos="{fx:.5f} {(0.03 + y_out) / 2:.5f} 0" rgba="0.9 0.88 0.85 1"/>
-      <geom name="floor_r" type="box" size="{fh} {(0.03 - y_out) / 2:.5f} {mid_z:.5f}"
-            pos="{fx:.5f} {-(0.03 + y_out) / 2:.5f} 0" rgba="0.9 0.88 0.85 1"/>"""
-
-  # Face plate: 4 boxes framing the mouth so a wide miss hits a wall.
-  a = r_mouth + 0.001
-  px = chamfer_len + 0.001
-  plate = f"""
-      <geom name="plate_t" type="box" size="0.001 0.055 {(0.055 - a) / 2:.5f}"
-            pos="{px:.5f} 0 {(0.055 + a) / 2:.5f}" rgba="0.9 0.88 0.85 1"/>
-      <geom name="plate_b" type="box" size="0.001 0.055 {(0.055 - a) / 2:.5f}"
-            pos="{px:.5f} 0 {-(0.055 + a) / 2:.5f}" rgba="0.9 0.88 0.85 1"/>
-      <geom name="plate_l" type="box" size="0.001 {(0.055 - a) / 2:.5f} {a:.5f}"
-            pos="{px:.5f} {(0.055 + a) / 2:.5f} 0" rgba="0.9 0.88 0.85 1"/>
-      <geom name="plate_r" type="box" size="0.001 {(0.055 - a) / 2:.5f} {a:.5f}"
-            pos="{px:.5f} {-(0.055 + a) / 2:.5f} 0" rgba="0.9 0.88 0.85 1"/>"""
+  socket = socket_geoms_xml(chamfer_len=chamfer_len)
 
   # Plug: cylinder body, two capsule pins (fromto excludes the cap radii).
   face = -0.020                                # plug face in plug-body frame
@@ -147,8 +185,7 @@ def scene_xml(y_off: float = 0.0, z_off: float = 0.0, yaw_deg: float = 0.0,
     <camera name="side" pos="0.085 -0.14 0.055" xyaxes="0.855 0.519 0 -0.16 0.264 0.951"/>
 
     <body name="socket" pos="0 0 0">
-      {wall}
-      {funnel}{floor}{plate}
+      {socket}
     </body>
 
     <!-- Carrier: an approach rail with force-limited drive; the plug hangs
@@ -232,3 +269,37 @@ def run_trial(y_off: float = 0.0, z_off: float = 0.0, yaw_deg: float = 0.0,
     "max_force_n": max_force,
     "unstable": max_speed > 0.3,
   }, frames
+
+
+ROOM_SOCKETS = {
+  # name: (pos, facing_deg) — MUST match the visual outlet bodies in
+  # models/room_1.xml. Positions are SURFACE-MOUNT (German "Aufputz"): the
+  # socket origin sits 0.037 m proud of the wall face so the entire recess
+  # (17 mm well + 20 mm floor) lives in front of the wall. A flush-mounted
+  # socket is impossible here: MuJoCo walls are solid boxes with no holes,
+  # and the first docking probe measured the pins bottoming on the wall slab
+  # THROUGH the recess interior. Aufputz sockets are real hardware, so this
+  # is a modelling choice, not a cheat. Wall faces: west -1.99, south -1.99,
+  # east +5.99.
+  "socket_a": ((-1.953, 1.0, 0.26), 0.0),
+  "socket_b": ((0.5, -1.953, 0.30), 90.0),
+  "socket_c": ((5.953, 4.5, 0.38), 180.0),
+}
+
+
+def write_room_sockets(path: str = "models/schuko_sockets.xml") -> None:
+  """Regenerate the invisible collision sockets included by room_1.xml."""
+  bodies = "".join(socket_body_xml(n, p, f) for n, (p, f) in ROOM_SOCKETS.items())
+  with open(path, "w") as fh:
+    fh.write(
+      "<!-- GENERATED by pluggybot.docking.schuko.write_room_sockets().\n"
+      "     Regenerate: uv run python -m pluggybot.docking.schuko\n"
+      "     Invisible (alpha 0) collision-only Schuko sockets aligned with the\n"
+      "     visual outlet bodies in room_1.xml. Convex box composition; see\n"
+      "     schuko.py for why and SimNotes.md for the measured tolerances. -->\n"
+      f"<mujocoinclude>{bodies}\n</mujocoinclude>\n")
+
+
+if __name__ == "__main__":
+  write_room_sockets()
+  print("wrote models/schuko_sockets.xml")

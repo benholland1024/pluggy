@@ -17,6 +17,12 @@ def axle_pos(data):
   return (data.qpos[0] - 0.08*math.cos(psi), data.qpos[1] - 0.08*math.sin(psi))
 
 
+
+def set_wheels(model, data, left_v, right_v):
+  """ctrl[:] stopped being safe when the arm actuators arrived (nu=4)."""
+  data.ctrl[model.actuator("left_motor").id] = left_v
+  data.ctrl[model.actuator("right_motor").id] = right_v
+
 def run_sim(reckoner, model, data, seconds=2.0):
   left_adr = model.joint("left_wheel_joint").qposadr[0]
   right_adr = model.joint("right_wheel_joint").qposadr[0]
@@ -44,7 +50,7 @@ def test_dead_reckoning_straight(world_model, world_data):
   run_sim(reckoner, world_model, world_data)
 
   # Drive straight
-  world_data.ctrl[:] = 10.0  # Run at less than full power to reduce slip inaccuracies
+  set_wheels(world_model, world_data, 10.0, 10.0)  # less than full power: reduce slip
   run_sim(reckoner, world_model, world_data, seconds=5.0)
   assert world_data.qpos[0] > 1.0           # actually went somewhere
 
@@ -65,7 +71,7 @@ def test_dead_reckoning_turn_in_place(world_model, world_data):
   true_theta += added_net_theta
 
   # Turn in place
-  world_data.ctrl[:] = [-10.0, 10.0]
+  set_wheels(world_model, world_data, -10.0, 10.0)
   added_net_theta, _ = run_sim(reckoner, world_model, world_data, seconds=3.0)
   true_theta += added_net_theta
 
@@ -92,7 +98,7 @@ def test_dead_reckoning_arc(world_model, world_data):
   true_theta += added_net_theta
 
   # Move while turning
-  world_data.ctrl[:] = [6.0, 10.0]
+  set_wheels(world_model, world_data, 6.0, 10.0)
   added_net_theta, _ = run_sim(reckoner, world_model, world_data, seconds=3.0)
   true_theta += added_net_theta
 
@@ -123,12 +129,12 @@ def test_dead_reckoning_s_curve(world_model, world_data):
   traveled_theta += added_traveled_theta
 
   # Move while turning, one way then the other
-  world_data.ctrl[:] = [6.0, 10.0]
+  set_wheels(world_model, world_data, 6.0, 10.0)
   added_net_theta, added_traveled_theta = run_sim(reckoner, world_model, world_data, seconds=3.0)
   true_theta += added_net_theta
   traveled_theta += added_traveled_theta
 
-  world_data.ctrl[:] = [10.0, 6.0]
+  set_wheels(world_model, world_data, 10.0, 6.0)
   added_net_theta, added_traveled_theta = run_sim(reckoner, world_model, world_data, seconds=3.0)
   true_theta += added_net_theta
   traveled_theta += added_traveled_theta

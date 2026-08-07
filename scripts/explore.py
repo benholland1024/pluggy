@@ -83,8 +83,10 @@ def run(headless: bool, max_sim_time: float) -> None:
       if step_count % SCAN_EVERY == 0:
         angles, ranges = scanner.scan(data)
         grid.update(pose, angles, ranges, scanner.max_range)
-        # safety reflex: something dead ahead that planning didn't expect
-        if mode == "drive" and waypoints:
+        # Safety reflex: armed in EVERY maneuver, incl. spins (same fix as
+        # lifecycle.py — the drive-only gating left spins blind, and the
+        # heavier armed robot measurably grazed a wall through that gap).
+        if mode != "backoff":
           front = ranges[np.abs(angles) < 0.35]
           if front.min() < FRONT_STOP_RANGE:
             mode = "backoff"

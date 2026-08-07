@@ -4,3 +4,5 @@ WARNING Mon Jul 13 11:49:33 2026: File size over 2GB is not supported. File: '.'
 
 WARNING Mon Jul 13 11:49:40 2026: File size over 2GB is not supported. File: '.'
 
+WARNING Thu Aug  6 20:36:40 2026: Nan, Inf or huge value in QACC at DOF 0. The simulation is unstable. Time = 2.6000.
+

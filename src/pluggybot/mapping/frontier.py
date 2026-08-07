@@ -12,15 +12,18 @@ FREE_THRESH = -0.5   # log-odds below this = confidently free
 OCC_THRESH = 0.5     # log-odds above this = confidently occupied
 
 
-def traversable_mask(logodds: np.ndarray, robot_radius_cells: int = 5) -> np.ndarray:
+def traversable_mask(logodds: np.ndarray, robot_radius_cells: int = 7) -> np.ndarray:
   """Cells the robot's CENTER may occupy: known-free and clear of obstacles.
 
   Occupied cells are inflated by the robot's radius so the planner can treat
-  the robot as a point. The default (5 cells = 0.25 m) is the chassis
-  half-diagonal (0.15 m) plus 0.10 m of margin for control and drift error —
-  inflation equal to the bare footprint plans zero-clearance paths.
-  Unknown space is never traversable — we don't plan through territory we
-  haven't seen.
+  the robot as a point. The default (7 cells = 0.35 m) covers the ARMED
+  robot's swing radius: the alignment-feeler tips sweep 0.27 m from the axle
+  (sqrt(0.24^2 + 0.12^2)), plus margin for control and drift error. The old
+  5-cell value was calibrated to the bare 0.15 m chassis half-diagonal, and
+  the day the arm was added a feeler measurably clipped an obstacle while
+  cornering. Inflation must track the robot's OUTERMOST geometry, not its
+  body. Unknown space is never traversable — we don't plan through territory
+  we haven't seen.
   """
   occupied = logodds > OCC_THRESH
   inflated = binary_dilation(occupied, iterations=robot_radius_cells)
