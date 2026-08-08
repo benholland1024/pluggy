@@ -154,19 +154,28 @@
         <geom name="carriage_block" type="box" size="0.025 0.02 0.022"
               pos="0.01 0 0.008" mass="0.25" rgba="0.4 0.42 0.45 1"/>
 
-        <!-- Alignment feelers: straddle the socket plate (lateral ±0.07
-             clears the ±0.042 plate + funnel). Both tips touching the wall
-             squares the robot's yaw mechanically (two-point contact across a
-             0.14 m base) and references insertion depth. They are NOT an
-             anti-tip brace — that idea was measured false: a wall contact is
+        <!-- Alignment feelers: straddle the socket at lateral ±0.085. The
+             earlier ±0.07 straddle cleared the ±0.042 VISUAL plate but not
+             the ±0.055 COLLISION housing of the surface-mount socket: with
+             >7 mm of lateral error a prong tip landed on the housing edge
+             39 mm proud of the wall (measured in the RL dock env), wrecking
+             both the yaw squaring and the depth reference. ±0.085 keeps
+             22 mm of margin. Both tips touching the wall squares the
+             robot's yaw mechanically (two-point contact across a 0.17 m
+             base) and references insertion depth. They are NOT an anti-tip
+             brace — that idea was measured false: a wall contact is
              one-way, so it can only push the robot AWAY from the wall, adding
              to the insertion reaction instead of resisting it (SimNotes).
              Tips at body-local x=+0.16 — 4 cm past the bumper, so the mapping
-             reflex (stops with the wall at body +0.20) still protects them. -->
+             reflex (stops with the wall at body +0.20) still protects them.
+             Mounted 2 cm ABOVE the plug axis (a standoff bracket on the
+             carriage): at ±0.085 and axis height the left prong swept
+             through the battery's corner at low lift — caught by the
+             geometric clearance test, invisible to contacts as always. -->
         <geom name="prong_l" type="box" size="0.10 0.008 0.008"
-              pos="0.16 0.07 0" mass="0.01" friction="1.5" rgba="0.25 0.25 0.28 1"/>
+              pos="0.16 0.085 0.02" mass="0.01" friction="1.5" rgba="0.25 0.25 0.28 1"/>
         <geom name="prong_r" type="box" size="0.10 0.008 0.008"
-              pos="0.16 -0.07 0" mass="0.01" friction="1.5" rgba="0.25 0.25 0.28 1"/>
+              pos="0.16 -0.085 0.02" mass="0.01" friction="1.5" rgba="0.25 0.25 0.28 1"/>
 
         <!-- Docking camera: rises with the plug, mounted above it so the plug
              body doesn't occlude the socket until the last moment. The head

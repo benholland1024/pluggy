@@ -35,6 +35,13 @@ Simulated self-charging robot in MuJoCo. Before doing anything, read:
   `scripts/lifecycle.py [--headless] [--explore-budget N]` (full mission:
   explore → charge → dock; DOCK is real physics — plug seats in the socket),
   `scripts/schuko_spike.py` (docking tolerance sweep)
+- `--views` on teleop.py / map_teleop.py / lifecycle.py saves `views.png`
+  (stereo pair + map + dock camera, issue #1) alongside `map.png`; ~15 ms/save
+- RL docking (milestone 6): train
+  `MUJOCO_GL=egl uv run python scripts/train_docking.py` (SAC over
+  `pluggybot.envs.DockEnv`; checkpoints under `runs/docking/`), score
+  `MUJOCO_GL=egl uv run python scripts/eval_docking.py --trials 24`
+  (scripted DOCK vs RL policy on identical room_1 trials with the real YOLO)
 - Sockets: `models/schuko_sockets.xml` is GENERATED (invisible collision
   layer for room_1's outlets) — regenerate with
   `uv run python -m pluggybot.docking.schuko` after moving an outlet

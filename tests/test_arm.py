@@ -133,6 +133,23 @@ def test_rcc_wrist_recenters(world_model, arm_data):
   assert abs(arm_data.qpos[jid]) < 0.001
 
 
+def test_prongs_clear_the_socket_housing(world_model):
+  """The feelers must straddle the surface-mount socket HOUSING (collision
+  half-width 0.055, standing 39 mm proud of the wall), not just the visual
+  plate (0.042). At the original ±0.07 straddle, >7 mm of lateral error put
+  a prong tip on the housing edge instead of the wall -- one prong 39 mm
+  short of the other wrecks both the yaw squaring and the depth reference
+  (measured in the RL dock env: every such episode stalled at the mouth).
+  Requires >= 10 mm of clearance beyond the housing edge; fails at ±0.07."""
+  housing_half = 0.055          # schuko.socket_geoms_xml plate frame extent
+  for name in ("prong_l", "prong_r"):
+    g = world_model.geom(name)
+    # geom pos is carriage-local; the carriage centerline IS the plug axis
+    inner_edge = abs(float(g.pos[1])) - float(g.size[1])
+    assert inner_edge >= housing_half + 0.010, \
+      f"{name} inner edge {inner_edge:.3f} m: prong can land on the housing"
+
+
 def test_arm_mass_is_counterbalanced(world_model, arm_data):
   """The arm hangs to the right of centerline; the battery offsets it. Un-
   balanced, the robot veered 0.26 m right over 4 m of open-loop driving —

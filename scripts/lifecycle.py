@@ -42,6 +42,7 @@ from pluggybot.behavior.navigation import (
   render_map,
 )
 from pluggybot.control import wheel_targets, slew, wrap_angle
+from pluggybot.docking.contact import charging_contact, feelers_touching
 from pluggybot.mapping.astar import astar
 from pluggybot.mapping.frontier import traversable_mask
 from pluggybot.mapping.landmarks import LandmarkStore, wall_normal
@@ -49,6 +50,7 @@ from pluggybot.mapping.occupancy_grid import OccupancyGrid
 from pluggybot.odometry.dead_reckoning import DeadReckoner
 from pluggybot.perception.outlet_spotter import OutletSpotter, latest_weights
 from pluggybot.perception.scanner import Scanner
+from pluggybot.viz import ViewDashboard
 
 State = Literal["EXPLORE", "GO_CHARGE", "FACE_OUTLET", "DOCK", "DONE"]
 
@@ -126,7 +128,8 @@ class Lifecycle:
   """
 
   def __init__(self, headless: bool, max_sim_time: float,
-               weights: str | None, explore_budget: float) -> None:
+               weights: str | None, explore_budget: float,
+               views: bool = False) -> None:
     self.model = mujoco.MjModel.from_xml_path("models/room_1.xml")
     self.data = mujoco.MjData(self.model)
     self.headless = headless
@@ -142,6 +145,9 @@ class Lifecycle:
     # Second spotter on the carriage camera: the terminal visual servo's eye.
     self.dock_spotter = (OutletSpotter(self.model, weights, camera_name="dock_eye")
                          if weights else None)
+    # Camera dashboard (issue #1): stereo pair + map + dock camera -> views.png,
+    # refreshed alongside map.png. Flag-gated: three extra renders per save.
+    self.dashboard = ViewDashboard(self.model) if views else None
 
     # -- model handles, looked up once
     m = self.model
@@ -458,35 +464,12 @@ class Lifecycle:
     return 0.0, 0.0
 
   def charging_contact(self) -> bool:
-    """The sim analog of the charging circuit's voltage detector: a PIN
-    touching socket-floor geometry at least 19 mm into the recess -- i.e.,
-    inside a pin channel, where a real Schuko's contacts live. Depth matters:
-    a mis-aligned pin bottoming on the floor's FRONT face (17 mm) touches the
-    same geoms, and an earlier name-only version accepted exactly that jam as
-    "plugged in" with the plug 9 mm below the holes."""
-    d, m = self.data, self.model
-    pins = {m.geom("plug_pin_l").id, m.geom("plug_pin_r").id}
-    for i in range(d.ncon):
-      c = d.contact[i]
-      pin = pins & {c.geom1, c.geom2}
-      if not pin:
-        continue
-      other = ({c.geom1, c.geom2} - pin).pop()
-      if "_floor_" not in (m.geom(other).name or ""):
-        continue
-      bid = m.geom(other).bodyid[0] if hasattr(m.geom(other).bodyid, "__len__")             else m.geom(other).bodyid
-      sp, mat = d.xpos[bid], d.xmat[bid]
-      nx, ny = float(mat[0]), float(mat[3])   # socket +x = outward normal
-      depth = -((c.pos[0] - sp[0]) * nx + (c.pos[1] - sp[1]) * ny)
-      if depth >= 0.019:
-        return True
-    return False
+    """The sim analog of the charging circuit's voltage detector — shared
+    with the RL docking env; see pluggybot.docking.contact for the history."""
+    return charging_contact(self.model, self.data)
 
   def feelers_touching(self) -> int:
-    prongs = {self.model.geom("prong_l").id, self.model.geom("prong_r").id}
-    d = self.data
-    return len({g for i in range(d.ncon)
-                for g in (d.contact[i].geom1, d.contact[i].geom2) if g in prongs})
+    return feelers_touching(self.model, self.data)
 
   def dock(self) -> tuple[float, float]:
     """Terminal docking: align lift -> visually servo in -> insert.
@@ -668,8 +651,11 @@ class Lifecycle:
     t = self.data.time
     if t - self.last_save >= MAP_SAVE_PERIOD:
       self.last_save = t
-      Image.fromarray(render_map(self.grid, self.pose, self.waypoints,
-                                  self.landmarks.landmarks)).save("map.png")
+      map_img = render_map(self.grid, self.pose, self.waypoints,
+                           self.landmarks.landmarks)
+      Image.fromarray(map_img).save("map.png")
+      if self.dashboard is not None:
+        self.dashboard.save(self.data, map_img)
     if self.headless and t - self.last_report >= 30.0:
       self.last_report = t
       known = int(np.count_nonzero(np.abs(self.grid.grid) > 0.5))
@@ -742,8 +728,10 @@ class Lifecycle:
             "  (seen-from estimate vs true wall normal)")
 
   def summarize(self) -> None:
-    Image.fromarray(render_map(self.grid, self.pose, [],
-                                self.landmarks.landmarks)).save("map.png")
+    map_img = render_map(self.grid, self.pose, [], self.landmarks.landmarks)
+    Image.fromarray(map_img).save("map.png")
+    if self.dashboard is not None:
+      self.dashboard.save(self.data, map_img)
     known = int(np.count_nonzero(np.abs(self.grid.grid) > 0.5))
     print(f"\nended after {self.data.time:.1f} sim-seconds in state {self.state}"
           f" (explore: {self.explore_done_reason})")
@@ -772,8 +760,11 @@ if __name__ == "__main__":
   parser.add_argument("--explore-budget", type=float, default=EXPLORE_BUDGET,
                       help="sim-seconds of exploring before the battery stand-in trips")
   parser.add_argument("--weights", default=None, help="YOLO weights; default: newest under runs/")
+  parser.add_argument("--views", action="store_true",
+                      help="also save views.png: stereo pair + map + dock camera")
   args = parser.parse_args()
   Lifecycle(
     headless=args.headless, max_sim_time=args.max_sim_time,
     weights=args.weights or latest_weights(), explore_budget=args.explore_budget,
+    views=args.views,
   ).run()

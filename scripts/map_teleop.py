@@ -1,3 +1,4 @@
+import argparse
 import time
 import numpy as np
 from PIL import Image
@@ -8,6 +9,12 @@ import mujoco.viewer
 from pluggybot.odometry.dead_reckoning import DeadReckoner
 from pluggybot.perception.scanner import Scanner
 from pluggybot.mapping.occupancy_grid import OccupancyGrid
+from pluggybot.viz import ViewDashboard
+
+parser = argparse.ArgumentParser(description="Teleop with live occupancy mapping")
+parser.add_argument("--views", action="store_true",
+                    help="also save views.png: stereo pair + map + dock camera")
+args = parser.parse_args()
 
 WHEEL_RADIUS = 0.045
 TRACK_WIDTH = 0.21
@@ -39,6 +46,7 @@ def key_callback(keycode):
 
 left = model.actuator("left_motor").id
 right = model.actuator("right_motor").id
+dashboard = ViewDashboard(model) if args.views else None
 
 with mujoco.viewer.launch_passive(model, data, key_callback=key_callback) as viewer:
   step_count = 0
@@ -83,6 +91,9 @@ with mujoco.viewer.launch_passive(model, data, key_callback=key_callback) as vie
       img = grid.to_image()
       cell_x, cell_y = grid.world_to_cell(reckoner.x, reckoner.y)
       img[max(0, cell_y - 1):cell_y + 2, max(0, cell_x - 1):cell_x + 2] = 64  # 3×3 dark block
-      Image.fromarray(np.flipud(img)).save("map.png")
+      map_img = np.flipud(img)
+      Image.fromarray(map_img).save("map.png")
+      if dashboard is not None:
+        dashboard.save(data, map_img)
 
 

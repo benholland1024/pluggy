@@ -305,6 +305,93 @@ visual servo under 2 cm standoff jitter: **4/12 (33 %)**, failures dominated by
 plug-height error the box-centre servo cannot measure well. That is precisely the
 gap the keypoint/PnP pose model (or RL) was predicted to fill — next.
 
+## RL docking environment lessons (milestone 6)
+
+### The feelers must clear the housing, not the plate
+First cheat-policy run in the RL dock env: 0/12, every near-miss stalled ~20 mm
+short at the socket mouth. Telemetry showed one feeler in contact 40 mm too
+early: at the ±0.07 m straddle, >7 mm of lateral error put a prong tip on the
+surface-mount housing's edge (collision half-width 0.055, standing 39 mm proud
+of the wall) instead of the wall behind it — one prong 39 mm short of the other
+wrecks both the yaw squaring and the depth reference. The ±0.07 figure had been
+checked against the ±0.042 *visual* plate. Widened to ±0.085 (22 mm margin):
+12/12. Then the widened left prong swept through the battery's corner at low
+lift — caught by test_arm.py's geometric transit sweep (contacts silent as
+always, same weld-filtering story) — so the prongs now ride 2 cm above the plug
+axis on a standoff bracket. Both constraints are pytest-guarded.
+
+### A synthetic sensor must be calibrated against the real one — including the robot's own body
+The env trains without YOLO: the "detector box" is the socket projected through
+the pinhole model and clipped to the frame (clipping is the measured mechanism
+behind the real detector's close-range vertical bias, so the synthetic sensor
+inherits that signature by geometry). Two calibrations still had to be
+measured, not assumed:
+  * **Effective extent.** The real YOLO boxes plate + housing at a steady
+    **47 mm half-extent** (measured 0.6 → 0.22 m, aligned robot) — not the
+    42 mm plate the first model projected.
+  * **Self-occlusion.** With the arm extended, real boxes shrank ~25 % from
+    below: the tube top rides ~0.048 m under the camera and its edge climbs the
+    frame as the arm extends. The first policy trained on the un-occluded model
+    learned to approach arm-first — in-env vision saw *through* its own arm, so
+    nothing taught it that extending early blinds the camera. The occlusion
+    line is now part of the sensor model, with the measured signature guarded
+    by a pytest.
+Meta-lesson: a simulated sensor is a claim about the real one; measure the
+claim before spending training compute on it (the contact-sheet lesson again,
+one level up).
+
+### Randomize with a mocap body, not recompilation
+The socket rides a `mocap="true"` body: reset repositions it continuously
+(height 0.24–0.40, lateral ±0.30) by writing `mocap_pos` — no model recompile,
+no discrete height grid. Static collision geoms on a mocap body behave as
+kinematic fixtures; contacts work normally.
+
+### The eval protocol is only trustworthy once it reproduces the baseline
+`eval_docking.py` makes the "2 cm standoff jitter" protocol explicit constants
+(pose jitter ±2 cm/±1°, landmark error ±2 cm xy / ±1.5 cm z, odometry drift
+±5 mm/±0.3°) and reruns the scripted controller on seeded trials: **4/12 =
+33.3 %**, matching the recorded baseline exactly (and 8/24 on the larger
+sweep — the rate held). Same trials, same real YOLO, same electrical charge
+criterion for both controllers — the RL number and the scripted number are
+finally the same experiment.
+
+### Odometry in the loop is part of the sensor model
+The policy trained on true-pose observations scored 100 % in-env and **1/24**
+in room_1. Telemetry: it had learned to grind the wheels against the wall at
+0.1 m/s — free when observations come from ground truth, catastrophic when
+they come from dead reckoning, because slipping wheels integrate phantom
+distance and the believed target range collapsed to zero within seconds of
+wall contact (the milestone-4 slip lesson, relearned inside an observation
+vector). The env now runs the actual `DeadReckoner` class per physics step.
+Corollary: whatever estimator the real robot runs, the training env must run
+the same one, fed by the same failure-prone signals.
+
+### SAC on this task finds the skill early and destabilizes late
+Reproduced twice: success climbs to a peak (100 % in-env at 300k on the
+lenient sensor model; 70.8 % at 140k on the honest one), then collapses to
+0 % sweeps with runaway episodes polluting the replay buffer. Resuming the
+best checkpoint at lr 1e-4 dipped (fresh empty buffer) and then diverged
+again. Mitigations worth trying next time someone cares about this
+controller: lower UTD, tau 0.002, TQC, or plain checkpoint-selection (which
+is what shipped: `best.zip` is chosen by eval success rate, never by recency).
+
+### The honest scoreboard, and what the RL work actually bought
+End-to-end on identical trials: scripted **8/24**, RL **6/24** — from a
+70.8 %-in-env policy, so a ~3× sim-to-room gap survived two rounds of
+sensor-model honesty. But the failures are complementary (union 13/24): RL
+took the high outlet C 3/9 where scripted took 1/9 — the vision-z gap it was
+built to fix, fixed — and docks in 4–12 s vs 9–19 s. Its own systematic hole
+is outlet A (0/8): telemetry shows a stable hover 0.35 m out, arm fully
+extended, an observation state that cannot occur in-env — a residual
+detection-channel mismatch (arm-out effective box extent ~41 mm vs the 47 mm
+aligned calibration) parks the policy in an out-of-distribution attractor.
+Meta-lesson: in-env success bought by details of a synthetic sensor is repaid
+with interest at deployment, and only an eval that runs BOTH controllers on
+the SAME trials makes the repayment visible. The wall-outlet RL effort parks
+here by design — the hub pivot (PluggyPlan milestone 8) makes purpose-built
+low-force docking the primary charge path, and everything this environment
+taught (coupling spikes, sensor calibration, odometry-in-the-loop) transfers.
+
 ## Debugging workflow that worked
 
 1. Reproduce headlessly with printed telemetry (pose, wheel ω, contact list, `ncon`) — vibes don't bisect.

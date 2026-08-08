@@ -200,12 +200,22 @@ budget, and it works without any control loop.
 
 ### Alignment feelers (formerly "wall-brace foot" — see consequence 1 above)
 
-Two prongs on the lift carriage straddling the socket plate (lateral ±0.07 m), tips
-4 cm past the bumper. Printed part + rubber tips, **≈ €2**. What they actually buy
-(measured): two-point wall contact squares the robot's yaw mechanically — the axis the
-docking spike found tightest — and gives a hard insertion-depth reference. What they do
-NOT buy: tipping resistance (a wall contact cannot pull; the "brace" framing was
-falsified in sim). Modelled in `pluggybot.xml` as `prong_l`/`prong_r`.
+Two prongs on the lift carriage straddling the socket (lateral **±0.085 m**, on a
+standoff bracket **2 cm above the plug axis**), tips 4 cm past the bumper. Printed
+part + rubber tips, **≈ €2**. What they actually buy (measured): two-point wall
+contact squares the robot's yaw mechanically — the axis the docking spike found
+tightest — and gives a hard insertion-depth reference. What they do NOT buy: tipping
+resistance (a wall contact cannot pull; the "brace" framing was falsified in sim).
+Modelled in `pluggybot.xml` as `prong_l`/`prong_r`.
+
+⚠ Both offsets are load-bearing, learned in the RL dock env (August 2026): the
+original ±0.07 straddle cleared the ±0.042 *visual* plate but not the ±0.055
+collision housing of the surface-mount socket — with >7 mm of lateral error a prong
+tip landed on the housing edge 39 mm proud of the wall, wrecking the yaw squaring
+and depth reference (every such episode stalled at the socket mouth). And at ±0.085
+on the plug axis, the left prong swept through the battery's corner at low lift —
+hence the 2 cm riser. Guarded by `test_prongs_clear_the_socket_housing` and the
+geometric transit sweep in tests/test_arm.py.
 
 ### Docking camera (3rd camera)
 
